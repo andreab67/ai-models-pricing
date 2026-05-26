@@ -24,6 +24,7 @@ spec:
               envFrom:
                 - configMapRef: { name: model-pricing-config }
                 - secretRef:    { name: model-pricing-secrets }
+                - secretRef:    { name: ses-creds }
               resources:
                 requests: { cpu: 50m,  memory: 128Mi }
                 limits:   { cpu: 250m, memory: 256Mi }

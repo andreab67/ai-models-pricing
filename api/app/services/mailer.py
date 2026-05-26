@@ -31,6 +31,7 @@ async def send(subject: str, html: str, text: str) -> None:
         port=_settings.smtp_port,
         username=_settings.smtp_username or None,
         password=_settings.smtp_password or None,
+        use_tls=_settings.smtp_use_tls,
         start_tls=_settings.smtp_starttls,
     )
     log.info(

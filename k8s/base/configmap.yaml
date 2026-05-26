@@ -10,8 +10,9 @@ data:
   OPENROUTER_BASE_URL: https://openrouter.ai/api/v1
   OPENROUTER_REFRESH_SECONDS: "300"
   CACHE_TTL_SECONDS: "300"
-  SMTP_HOST: smtp.andrea-house.com
-  SMTP_PORT: "587"
-  SMTP_STARTTLS: "true"
-  SMTP_FROM: pricing-bot@andrea-house.com
+  SMTP_HOST: email-smtp.us-east-1.amazonaws.com
+  SMTP_PORT: "465"
+  SMTP_USE_TLS: "true"
+  SMTP_STARTTLS: "false"
+  SMTP_FROM: greenyogainc@greenyogainc.com
   SMTP_TO: '["andreab@greenyogainc.com"]'

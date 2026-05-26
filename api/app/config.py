@@ -48,11 +48,12 @@ class Settings(BaseSettings):
 
     # --- mail -------------------------------------------------------------
     smtp_host: str = Field(default="")
-    smtp_port: int = Field(default=587)
+    smtp_port: int = Field(default=465)
     smtp_username: str = Field(default="")
     smtp_password: str = Field(default="")
-    smtp_starttls: bool = Field(default=True)
-    smtp_from: str = Field(default="pricing-bot@andrea-house.com")
+    smtp_use_tls: bool = Field(default=True)   # port 465 SSL wrapper (SES)
+    smtp_starttls: bool = Field(default=False)  # port 587 STARTTLS — not used with SES/465
+    smtp_from: str = Field(default="greenyogainc@greenyogainc.com")
     smtp_to: list[str] = Field(default_factory=list)
 
     # --- ranking ----------------------------------------------------------
