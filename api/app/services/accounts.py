@@ -28,7 +28,7 @@ async def _check_openrouter() -> AccountProviderUsage:
     async with httpx.AsyncClient(timeout=10.0) as client:
         try:
             resp = await client.get(
-                "https://openrouter.ai/api/v1/auth/key",
+                "https://openrouter.ai/api/v1/credits",
                 headers={"Authorization": f"Bearer {key}"},
             )
             if resp.status_code == 401:
@@ -38,19 +38,17 @@ async def _check_openrouter() -> AccountProviderUsage:
             resp.raise_for_status()
             data = resp.json().get("data", {})
 
-            # OpenRouter returns usage in credits; 1 credit = $0.000001 USD
-            spent_usd = round(float(data.get("usage") or 0) / 1_000_000, 4)
-            limit_credits = data.get("limit")
-            limit_usd = round(float(limit_credits) / 1_000_000, 4) if limit_credits else None
-            remaining_usd = round(float(data.get("limit_remaining") or 0) / 1_000_000, 4) if limit_credits else None
+            # total_credits and total_usage are both in USD
+            total_credits = float(data.get("total_credits") or 0)
+            total_usage = float(data.get("total_usage") or 0)
+            remaining = total_credits - total_usage
 
             return AccountProviderUsage(
                 provider="openrouter",
                 configured=True,
-                plan=data.get("label"),
-                spent_usd=spent_usd,
-                limit_usd=limit_usd,
-                remaining_usd=remaining_usd,
+                spent_usd=round(total_usage, 4),
+                limit_usd=round(total_credits, 4) if total_credits else None,
+                remaining_usd=round(remaining, 4) if total_credits else None,
             )
         except Exception as exc:
             log.warning("openrouter_check_failed", error=str(exc))
@@ -60,20 +58,54 @@ async def _check_openrouter() -> AccountProviderUsage:
 
 
 async def _check_kilo() -> AccountProviderUsage:
+    key = _settings.kilo_api_key
     tier = _settings.kilo_tier
+
+    # Resolve plan details from local YAML
+    plan_label: str | None = None
+    limit_usd: float | None = None
     try:
         plans = load_plans()
         plan = next((p for p in plans if p.tier == tier), None)
         if plan:
+            plan_label = f"{tier.capitalize()} ${plan.monthly_usd:.0f}/mo"
+            limit_usd = plan.paid_credits_usd
+    except Exception as exc:
+        log.warning("kilo_plan_load_failed", error=str(exc))
+
+    if not key:
+        return AccountProviderUsage(
+            provider="kilo",
+            configured=False,
+            plan=plan_label,
+            limit_usd=limit_usd,
+        )
+
+    # Validate key via models ping — no balance endpoint exists in the Kilo gateway API
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        try:
+            resp = await client.get(
+                "https://api.kilo.ai/api/gateway/models",
+                headers={"Authorization": f"Bearer {key}"},
+            )
+            if resp.status_code == 401:
+                return AccountProviderUsage(
+                    provider="kilo", configured=True, plan=plan_label,
+                    limit_usd=limit_usd, error="API key invalid",
+                )
+            resp.raise_for_status()
             return AccountProviderUsage(
                 provider="kilo",
                 configured=True,
-                plan=f"{tier.capitalize()} ${plan.monthly_usd:.0f}/mo",
-                limit_usd=plan.paid_credits_usd,
+                plan=plan_label,
+                limit_usd=limit_usd,
             )
-    except Exception as exc:
-        log.warning("kilo_check_failed", error=str(exc))
-    return AccountProviderUsage(provider="kilo", configured=True, plan=tier)
+        except Exception as exc:
+            log.warning("kilo_check_failed", error=str(exc))
+            return AccountProviderUsage(
+                provider="kilo", configured=True, plan=plan_label,
+                limit_usd=limit_usd, error=str(exc)[:80],
+            )
 
 
 async def _check_openai() -> AccountProviderUsage:
