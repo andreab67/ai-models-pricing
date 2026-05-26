@@ -26,7 +26,7 @@ services:
     build: ./api
     command: ["alembic", "upgrade", "head"]
     environment:
-      DATABASE_URL: postgresql+asyncpg://pricing:pricing@postgres:5432/pricing
+      DATABASE_URL: postgresql+psycopg://pricing:pricing@postgres:5432/pricing
     depends_on:
       postgres: { condition: service_healthy }
 
@@ -34,7 +34,7 @@ services:
     build: ./api
     ports: ["8000:8000"]
     environment:
-      DATABASE_URL: postgresql+asyncpg://pricing:pricing@postgres:5432/pricing
+      DATABASE_URL: postgresql+psycopg://pricing:pricing@postgres:5432/pricing
       REDIS_URL: redis://redis:6379/0
       CORS_ORIGINS: '["http://localhost:3000"]'
     depends_on:

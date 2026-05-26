@@ -61,7 +61,7 @@ lint:k8s:
 # --------------------------------------------------------------------- test
 test:api:
   stage: test
-  image: python:3.12-slim
+  image: python:3.14-slim
   services:
     - name: postgres:16-alpine
       alias: postgres
@@ -72,10 +72,9 @@ test:api:
     - name: redis:7-alpine
       alias: redis
   variables:
-    DATABASE_URL: "postgresql+asyncpg://pricing:pricing@postgres:5432/pricing"
+    DATABASE_URL: "postgresql+psycopg://pricing:pricing@postgres:5432/pricing"
     REDIS_URL: "redis://redis:6379/0"
   before_script:
-    - apt-get update && apt-get install -y --no-install-recommends libpq-dev gcc
     - cd api
     - pip install --no-cache-dir -e ".[dev]"
   script:
