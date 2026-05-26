@@ -111,81 +111,87 @@ async def _check_kilo() -> AccountProviderUsage:
 async def _check_openai() -> AccountProviderUsage:
     admin_key = _settings.openai_admin_key
     regular_key = _settings.openai_api_key
-    key = admin_key or regular_key
-    if not key:
+    if not admin_key and not regular_key:
         return AccountProviderUsage(provider="openai", configured=False)
 
     async with httpx.AsyncClient(timeout=10.0) as client:
-        # Validate key first
-        try:
-            resp = await client.get(
-                "https://api.openai.com/v1/models",
-                headers={"Authorization": f"Bearer {regular_key or admin_key}"},
-            )
-            if resp.status_code == 401:
-                return AccountProviderUsage(
-                    provider="openai", configured=True, error="API key invalid"
+        if admin_key:
+            # Use the cost report as both validation and data source
+            try:
+                start_time = int((datetime.now(UTC) - timedelta(days=30)).timestamp())
+                period_start = (datetime.now(UTC) - timedelta(days=30)).strftime("%b %d")
+                resp = await client.get(
+                    "https://api.openai.com/v1/organization/costs",
+                    headers={"Authorization": f"Bearer {admin_key}"},
+                    params={"start_time": start_time, "limit": 30, "bucket_width": "1d"},
                 )
-            resp.raise_for_status()
-        except Exception as exc:
-            log.warning("openai_check_failed", error=str(exc))
-            return AccountProviderUsage(provider="openai", configured=True, error=str(exc)[:80])
-
-        if not admin_key:
-            return AccountProviderUsage(provider="openai", configured=True)
-
-        # Fetch 30-day cost report with admin key
-        try:
-            start_time = int((datetime.now(UTC) - timedelta(days=30)).timestamp())
-            period_start = (datetime.now(UTC) - timedelta(days=30)).strftime("%b %d")
-            resp = await client.get(
-                "https://api.openai.com/v1/organization/costs",
-                headers={"Authorization": f"Bearer {admin_key}"},
-                params={"start_time": start_time, "limit": 30, "bucket_width": "1d"},
-            )
-            resp.raise_for_status()
-            buckets = resp.json().get("data", [])
-            total = sum(
-                float(r.get("amount", {}).get("value", 0))
-                for b in buckets
-                for r in b.get("results", [])
-            )
-            return AccountProviderUsage(
-                provider="openai",
-                configured=True,
-                spent_usd=round(total, 4),
-                period_start=period_start,
-            )
-        except Exception as exc:
-            log.warning("openai_costs_failed", error=str(exc))
-            return AccountProviderUsage(provider="openai", configured=True, error=str(exc)[:80])
+                if resp.status_code == 401:
+                    return AccountProviderUsage(
+                        provider="openai", configured=True, error="Admin key invalid"
+                    )
+                resp.raise_for_status()
+                buckets = resp.json().get("data", [])
+                total = sum(
+                    float(r.get("amount", {}).get("value", 0))
+                    for b in buckets
+                    for r in b.get("results", [])
+                )
+                return AccountProviderUsage(
+                    provider="openai",
+                    configured=True,
+                    spent_usd=round(total, 4),
+                    period_start=period_start,
+                )
+            except Exception as exc:
+                log.warning("openai_costs_failed", error=str(exc))
+                return AccountProviderUsage(
+                    provider="openai", configured=True, error=str(exc)[:80]
+                )
+        else:
+            # Regular key only — just validate
+            try:
+                resp = await client.get(
+                    "https://api.openai.com/v1/models",
+                    headers={"Authorization": f"Bearer {regular_key}"},
+                )
+                if resp.status_code == 401:
+                    return AccountProviderUsage(
+                        provider="openai", configured=True, error="API key invalid"
+                    )
+                resp.raise_for_status()
+                return AccountProviderUsage(provider="openai", configured=True)
+            except Exception as exc:
+                log.warning("openai_check_failed", error=str(exc))
+                return AccountProviderUsage(
+                    provider="openai", configured=True, error=str(exc)[:80]
+                )
 
 
 async def _check_anthropic() -> AccountProviderUsage:
     admin_key = _settings.anthropic_admin_key
     regular_key = _settings.anthropic_api_key
-    key = admin_key or regular_key
-    if not key:
+    if not admin_key and not regular_key:
         return AccountProviderUsage(provider="anthropic", configured=False)
 
     async with httpx.AsyncClient(timeout=10.0) as client:
-        # Validate key first
-        try:
-            resp = await client.get(
-                "https://api.anthropic.com/v1/models",
-                headers={"x-api-key": regular_key or admin_key, "anthropic-version": "2023-06-01"},
-            )
-            if resp.status_code == 401:
-                return AccountProviderUsage(
-                    provider="anthropic", configured=True, error="API key invalid"
-                )
-            resp.raise_for_status()
-        except Exception as exc:
-            log.warning("anthropic_check_failed", error=str(exc))
-            return AccountProviderUsage(provider="anthropic", configured=True, error=str(exc)[:80])
-
         if not admin_key:
-            return AccountProviderUsage(provider="anthropic", configured=True)
+            # Regular key only — just validate
+            try:
+                resp = await client.get(
+                    "https://api.anthropic.com/v1/models",
+                    headers={"x-api-key": regular_key, "anthropic-version": "2023-06-01"},
+                )
+                if resp.status_code == 401:
+                    return AccountProviderUsage(
+                        provider="anthropic", configured=True, error="API key invalid"
+                    )
+                resp.raise_for_status()
+                return AccountProviderUsage(provider="anthropic", configured=True)
+            except Exception as exc:
+                log.warning("anthropic_check_failed", error=str(exc))
+                return AccountProviderUsage(
+                    provider="anthropic", configured=True, error=str(exc)[:80]
+                )
 
         # Fetch 30-day cost report with admin key
         try:
