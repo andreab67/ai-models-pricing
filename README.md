@@ -10,7 +10,7 @@ Live OpenRouter token pricing vs. Kilo Code plan math, served at
 | FastAPI backend | `api/`                | Polls OpenRouter, caches in Redis, persists snapshots in Postgres, renders daily email |
 | Next.js dashboard | `web/`              | App Router, Tailwind, Recharts, dark/light, mobile responsive |
 | K8s manifests   | `k8s/`                | Kustomize base + prod overlay, Traefik ingress, cert-manager TLS, CronJobs, ServiceMonitor |
-| GitLab CI       | `.gitlab-ci.yml`      | lint → test → Kaniko build → Trivy scan → Harbor push → manual deploy |
+| GitLab CI       | `.gitlab-ci.yml`      | lint → test → Kaniko build → Trivy scan → GitLab registry push → manual deploy |
 | Local dev       | `docker-compose.yml`  | Postgres + Redis + API + Web                           |
 
 ## Architecture
@@ -31,7 +31,7 @@ Live OpenRouter token pricing vs. Kilo Code plan math, served at
                           (history)        (cache)      /api/v1/models
 
                   CronJobs (in same namespace, same image):
-                  • refresh-pricing  every 15m
+                  • refresh-pricing  every 5m
                   • daily-report     08:00 America/Denver
                   • kilo-diff        Mon 07:00 (alerts on Kilo page change)
 ```
@@ -108,20 +108,17 @@ Tune via `RANK_*` env vars in `api/app/config.py`.
 
 ## Production deploy (k8s-home)
 
+Postgres and Redis are **shared cluster services** — no in-namespace database pods.
+The namespace must have the following pre-created (pipeline creates them via `KUBE_CONFIG`):
+
+- `gitlab-regcred` — GitLab registry pull secret
+- `model-pricing-secrets` — DATABASE_URL, REDIS_URL (with password), SMTP creds
+
 ```bash
-# 1. Harbor pull secret (one-time per namespace)
-kubectl -n model-pricing create secret docker-registry harbor-pull \
-  --docker-server=harbor.andrea-house.com \
-  --docker-username=<robot> \
-  --docker-password=<token>
-
-# 2. Real secrets (replace the example with SealedSecret/ExternalSecret in prod)
-kubectl -n model-pricing apply -f k8s/base/secret.example.yaml  # EDIT FIRST
-
-# 3. Apply the overlay
+# 1. Apply the overlay (pipeline does this automatically on main)
 kubectl apply -k k8s/overlays/prod
 
-# 4. Verify
+# 2. Verify
 kubectl -n model-pricing get pods,svc,ingress,cronjobs
 kubectl -n model-pricing logs deploy/api -f
 kubectl -n model-pricing create job --from=cronjob/refresh-pricing seed
@@ -158,7 +155,10 @@ status-bar extension that shows live OpenRouter cost from this API.
   Override in `app/jobs/daily_report.py` if your baseline differs.
 - `kilo_plans.yaml` is hand-maintained. The `kilo-diff` CronJob hashes the
   live page weekly and emails when it changes — refresh the YAML and commit.
-- Postgres runs as a single-replica StatefulSet. Fine for this workload;
-  swap to CloudNativePG or your managed flavor for HA.
+- Postgres and Redis are **shared cluster services** (pgvector namespace + redis
+  namespace). No in-namespace database pods.
+- Data refresh cadence: OpenRouter `/models` is public and unauthenticated —
+  the `refresh-pricing` CronJob hits it every 5 min at zero cost. Redis cache
+  TTL matches at 300s. Frontend SWR polls every 300s. No provider API costs.
 - OpenRouter free tier rate limits (50 req/day) don't matter here because
   `/models` is unauthenticated and not throttled at that scale.
