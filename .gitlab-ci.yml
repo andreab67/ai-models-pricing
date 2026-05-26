@@ -164,8 +164,7 @@ scan:web:
 deploy:prod:
   stage: deploy
   image:
-    name: registry.k8s.io/kubectl:v1.31.0
-    entrypoint: [""]
+    name: alpine/k8s:1.32.13
   before_script:
     - mkdir -p ~/.kube
     - echo "$KUBE_CONFIG" | base64 -d > ~/.kube/config
