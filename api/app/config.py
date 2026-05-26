@@ -67,8 +67,12 @@ class Settings(BaseSettings):
     rank_top_n: int = Field(default=10)
 
     # --- external account keys -------------------------------------------
+    openrouter_api_key: str = Field(default="")
     openai_api_key: str = Field(default="")
     anthropic_api_key: str = Field(default="")
+
+    # --- kilo plan (used for account widget) -----------------------------
+    kilo_tier: str = Field(default="starter")
 
     # --- comparison wrappers ---------------------------------------------
     openrouter_payg_fee_pct: float = Field(default=0.055)

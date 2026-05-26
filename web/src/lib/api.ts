@@ -110,7 +110,7 @@ export function useHistory(modelId: string | null, days: number = 30) {
 }
 
 export interface AccountProviderUsage {
-  provider: "openai" | "anthropic";
+  provider: "openai" | "anthropic" | "openrouter" | "kilo";
   configured: boolean;
   plan: string | null;
   limit_usd: number | null;
@@ -121,6 +121,8 @@ export interface AccountProviderUsage {
 }
 
 export interface AccountsUsage {
+  openrouter: AccountProviderUsage;
+  kilo: AccountProviderUsage;
   openai: AccountProviderUsage;
   anthropic: AccountProviderUsage;
   fetched_at: string;

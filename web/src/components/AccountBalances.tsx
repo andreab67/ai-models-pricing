@@ -2,24 +2,27 @@
 
 import { useAccountUsage, fmtUsd, type AccountProviderUsage } from "@/lib/api";
 
-const PROVIDER_LABELS: Record<string, { name: string; color: string }> = {
-  openai: { name: "OpenAI", color: "text-green-400" },
-  anthropic: { name: "Anthropic", color: "text-orange-400" },
+const PROVIDER_META: Record<string, { name: string; color: string }> = {
+  openrouter: { name: "OpenRouter", color: "text-violet-400" },
+  kilo:       { name: "Kilo Code",  color: "text-blue-400"   },
+  openai:     { name: "OpenAI",     color: "text-green-400"  },
+  anthropic:  { name: "Anthropic",  color: "text-orange-400" },
 };
 
 function ProviderCard({ account }: { account: AccountProviderUsage }) {
-  const meta = PROVIDER_LABELS[account.provider];
+  const meta = PROVIDER_META[account.provider];
+  const isKilo = account.provider === "kilo";
 
   const usedPct =
     account.limit_usd && account.spent_usd != null
       ? Math.min(100, (account.spent_usd / account.limit_usd) * 100)
       : null;
 
-  const barColor =
-    usedPct == null ? "bg-zinc-600" :
-    usedPct > 85 ? "bg-red-500" :
-    usedPct > 60 ? "bg-yellow-500" :
-    "bg-emerald-500";
+  const usedColor =
+    usedPct == null   ? "text-zinc-500"   :
+    usedPct > 85      ? "text-red-400"    :
+    usedPct > 60      ? "text-yellow-400" :
+    "text-emerald-400";
 
   return (
     <div className="rounded-lg border border-zinc-700 bg-zinc-900 p-4 space-y-3">
@@ -34,13 +37,55 @@ function ProviderCard({ account }: { account: AccountProviderUsage }) {
 
       {!account.configured ? (
         <p className="text-xs text-zinc-500">
-          API key not configured —{" "}
-          <span className="text-zinc-400">add {account.provider.toUpperCase()}_API_KEY to cluster secret</span>
+          Key not configured —{" "}
+          <span className="text-zinc-400">
+            add {account.provider.toUpperCase()}_API_KEY to cluster secret
+          </span>
         </p>
       ) : account.error ? (
         <p className="text-xs text-red-400">{account.error}</p>
+      ) : isKilo ? (
+        <p className="text-xs text-zinc-400">
+          Live spend not available via API — check{" "}
+          <span className="text-zinc-300">kilo.ai dashboard</span>
+        </p>
       ) : (
-        <p className="text-xs text-emerald-400">Key active</p>
+        <>
+          {account.spent_usd != null ? (
+            <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
+              <span className="text-zinc-400">Total used</span>
+              <span className="text-right font-mono">{fmtUsd(account.spent_usd)}</span>
+
+              {account.limit_usd != null && (
+                <>
+                  <span className="text-zinc-400">Credit limit</span>
+                  <span className="text-right font-mono">{fmtUsd(account.limit_usd)}</span>
+                </>
+              )}
+
+              {account.remaining_usd != null && (
+                <>
+                  <span className="text-zinc-400">Remaining</span>
+                  <span
+                    className={`text-right font-mono font-semibold ${
+                      account.remaining_usd < 5  ? "text-red-400"     :
+                      account.remaining_usd < 20 ? "text-yellow-400"  :
+                      "text-emerald-400"
+                    }`}
+                  >
+                    {fmtUsd(account.remaining_usd)}
+                  </span>
+                </>
+              )}
+            </div>
+          ) : (
+            <p className="text-xs text-emerald-400">Key active</p>
+          )}
+
+          {usedPct != null && (
+            <p className={`text-xs text-right ${usedColor}`}>{usedPct.toFixed(1)}% used</p>
+          )}
+        </>
       )}
     </div>
   );
@@ -55,14 +100,12 @@ export function AccountBalances() {
         My API Accounts
       </h2>
 
-      {isLoading && (
-        <p className="text-sm text-zinc-500">Loading account data…</p>
-      )}
-      {error && (
-        <p className="text-sm text-red-400">Failed to load: {error.message}</p>
-      )}
+      {isLoading && <p className="text-sm text-zinc-500">Loading account data…</p>}
+      {error && <p className="text-sm text-red-400">Failed to load: {error.message}</p>}
       {data && (
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+          <ProviderCard account={data.openrouter} />
+          <ProviderCard account={data.kilo} />
           <ProviderCard account={data.openai} />
           <ProviderCard account={data.anthropic} />
         </div>
