@@ -14,12 +14,6 @@ spec:
     - host: models.andrea-house.com
       http:
         paths:
-          - path: /api
-            pathType: Prefix
-            backend:
-              service:
-                name: api
-                port: { name: http }
           - path: /
             pathType: Prefix
             backend:
