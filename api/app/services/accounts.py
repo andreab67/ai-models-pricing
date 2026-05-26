@@ -248,23 +248,34 @@ async def get_activity() -> ActivityResponse:
             # Response shape: {"data": [{model_id, requests, prompt_tokens,
             #   completion_tokens, total_cost / cost / ...}, ...]}
             entries = raw.get("data") or raw.get("activity") or []
-            items: list[ModelActivityItem] = []
+            # Aggregate by model_id — API returns one row per key/date bucket
+            agg: dict[str, ModelActivityItem] = {}
             for e in entries:
                 model_id = e.get("model") or e.get("model_id") or ""
                 if not model_id:
                     continue
-                items.append(ModelActivityItem(
-                    model_id=model_id,
-                    requests=int(e.get("requests") or e.get("count") or 0),
-                    prompt_tokens=int(e.get("prompt_tokens") or e.get("input_tokens") or 0),
-                    completion_tokens=int(
-                        e.get("completion_tokens") or e.get("output_tokens") or 0
-                    ),
-                    cost_usd=float(
-                        e.get("total_cost") or e.get("cost") or e.get("usage") or 0
-                    ),
-                ))
-            items.sort(key=lambda x: x.cost_usd, reverse=True)
+                cost = float(e.get("total_cost") or e.get("cost") or e.get("usage") or 0)
+                reqs = int(e.get("requests") or e.get("count") or 0)
+                p_tok = int(e.get("prompt_tokens") or e.get("input_tokens") or 0)
+                c_tok = int(e.get("completion_tokens") or e.get("output_tokens") or 0)
+                if model_id in agg:
+                    existing = agg[model_id]
+                    agg[model_id] = ModelActivityItem(
+                        model_id=model_id,
+                        requests=existing.requests + reqs,
+                        prompt_tokens=existing.prompt_tokens + p_tok,
+                        completion_tokens=existing.completion_tokens + c_tok,
+                        cost_usd=round(existing.cost_usd + cost, 6),
+                    )
+                else:
+                    agg[model_id] = ModelActivityItem(
+                        model_id=model_id,
+                        requests=reqs,
+                        prompt_tokens=p_tok,
+                        completion_tokens=c_tok,
+                        cost_usd=round(cost, 6),
+                    )
+            items = sorted(agg.values(), key=lambda x: x.cost_usd, reverse=True)
             result = ActivityResponse(items=items, fetched_at=datetime.now(UTC))
         except Exception as exc:
             log.warning("openrouter_activity_failed", error=str(exc))
