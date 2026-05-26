@@ -62,6 +62,8 @@ export function ModelDetailModal({
       output: c.completion_usd_per_mtok,
     })) ?? [];
 
+  const isFreeModel = chartData.length > 0 && chartData.every((d) => d.input === 0 && d.output === 0);
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
@@ -152,7 +154,7 @@ export function ModelDetailModal({
               </table>
             </div>
 
-            <div className="mt-4 h-64">
+            {!isFreeModel && <div className="mt-4 h-64">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={chartData}>
                   <CartesianGrid stroke="rgb(var(--border))" strokeDasharray="3 3" />
@@ -170,7 +172,7 @@ export function ModelDetailModal({
                   <Bar dataKey="output" name="Out $/Mtok" fill="#22c55e" />
                 </BarChart>
               </ResponsiveContainer>
-            </div>
+            </div>}
 
             {history && history.length > 1 && (
               <p className="mt-3 text-xs opacity-60">

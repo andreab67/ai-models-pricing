@@ -11,12 +11,22 @@ import {
   YAxis,
 } from "recharts";
 
-import { useHistory, useTopModels } from "@/lib/api";
+import { useActivity, useHistory, useTopModels } from "@/lib/api";
 
 export default function TrendsPage() {
   const { data: top } = useTopModels(10);
+  const { data: activity } = useActivity();
   const [modelId, setModelId] = useState<string | null>(null);
   const { data: history } = useHistory(modelId, 90);
+
+  // Merge Top 10 + user's activity models into one deduplicated list
+  const topIds = new Set(top?.map((r) => r.model.id) ?? []);
+  const activityModels = activity?.items.map((i) => ({ id: i.model_id, name: i.model_id.split("/")[1] ?? i.model_id })) ?? [];
+  const topModels = top?.map((r) => ({ id: r.model.id, name: r.model.name })) ?? [];
+  const allModels = [
+    ...topModels,
+    ...activityModels.filter((m) => !topIds.has(m.id)),
+  ];
 
   const chartData =
     history?.map((s) => ({
@@ -34,12 +44,12 @@ export default function TrendsPage() {
           <select
             value={modelId ?? ""}
             onChange={(e) => setModelId(e.target.value || null)}
-            className="ml-2 rounded border border-border bg-transparent p-1 text-sm"
+            className="ml-2 rounded border border-border bg-[rgb(var(--card))] text-[rgb(var(--fg))] p-1 text-sm"
           >
             <option value="">Select…</option>
-            {top?.map((r) => (
-              <option key={r.model.id} value={r.model.id}>
-                {r.model.name}
+            {allModels.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.name}
               </option>
             ))}
           </select>
