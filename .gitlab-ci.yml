@@ -192,4 +192,4 @@ deploy:prod:
     url: https://models.andrea-house.com
   rules:
     - if: '$CI_COMMIT_BRANCH == "main"'
-      when: manual
+      when: on_success
