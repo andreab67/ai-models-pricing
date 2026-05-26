@@ -173,6 +173,7 @@ deploy:prod:
   script:
     - kubectl -n model-pricing apply -k k8s/overlays/prod
     - kubectl -n model-pricing set image deployment/api
+        migrate=$IMAGE_API:$CI_COMMIT_SHORT_SHA
         api=$IMAGE_API:$CI_COMMIT_SHORT_SHA
     - kubectl -n model-pricing set image deployment/web
         web=$IMAGE_WEB:$CI_COMMIT_SHORT_SHA
