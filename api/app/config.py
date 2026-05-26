@@ -41,7 +41,7 @@ class Settings(BaseSettings):
 
     # --- postgres ---------------------------------------------------------
     database_url: str = Field(
-        default="postgresql+asyncpg://pricing:pricing@localhost:5432/pricing"
+        default="postgresql+psycopg://pricing:pricing@localhost:5432/pricing"
     )
     db_pool_size: int = Field(default=5)
     db_max_overflow: int = Field(default=10)
