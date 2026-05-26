@@ -1,0 +1,39 @@
+"use client";
+
+import { useState } from "react";
+
+import { KiloPassCalculator } from "@/components/KiloPassCalculator";
+import { ModelDetailModal } from "@/components/ModelDetailModal";
+import { ModelTable } from "@/components/ModelTable";
+import { TopTenRanking } from "@/components/TopTenRanking";
+
+export default function DashboardPage() {
+  const [selected, setSelected] = useState<string | null>(null);
+  const [tier, setTier] = useState("pro");
+  const [streakMonths, setStreakMonths] = useState(8);
+  const [annual, setAnnual] = useState(false);
+
+  return (
+    <div className="space-y-6">
+      <KiloPassCalculator
+        tier={tier}
+        setTier={setTier}
+        streakMonths={streakMonths}
+        setStreakMonths={setStreakMonths}
+        annual={annual}
+        setAnnual={setAnnual}
+      />
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_2fr]">
+        <TopTenRanking onSelect={setSelected} />
+        <ModelTable onSelect={setSelected} />
+      </div>
+      <ModelDetailModal
+        modelId={selected}
+        onClose={() => setSelected(null)}
+        kiloTier={tier}
+        kiloStreakMonths={streakMonths}
+        kiloAnnual={annual}
+      />
+    </div>
+  );
+}

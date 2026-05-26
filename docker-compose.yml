@@ -1,0 +1,54 @@
+# Local dev stack: postgres + redis + api + web.
+# Run: docker compose up --build
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: pricing
+      POSTGRES_USER: pricing
+      POSTGRES_PASSWORD: pricing
+    ports: ["5432:5432"]
+    volumes: ["pgdata:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pricing -d pricing"]
+      interval: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports: ["6379:6379"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      retries: 10
+
+  migrate:
+    build: ./api
+    command: ["alembic", "upgrade", "head"]
+    environment:
+      DATABASE_URL: postgresql+asyncpg://pricing:pricing@postgres:5432/pricing
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  api:
+    build: ./api
+    ports: ["8000:8000"]
+    environment:
+      DATABASE_URL: postgresql+asyncpg://pricing:pricing@postgres:5432/pricing
+      REDIS_URL: redis://redis:6379/0
+      CORS_ORIGINS: '["http://localhost:3000"]'
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis:    { condition: service_healthy }
+      migrate:  { condition: service_completed_successfully }
+
+  web:
+    build: ./web
+    ports: ["3000:3000"]
+    environment:
+      API_BASE_URL: http://api:8000
+    depends_on:
+      api: { condition: service_started }
+
+volumes:
+  pgdata: {}

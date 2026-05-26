@@ -1,0 +1,66 @@
+{
+  "name": "model-pricing-statusbar",
+  "displayName": "Model Pricing Status Bar",
+  "description": "Shows the current cheapest qualified coding model from models.andrea-house.com",
+  "version": "0.1.0",
+  "publisher": "andrea-house",
+  "engines": { "vscode": "^1.95.0" },
+  "categories": ["Other"],
+  "activationEvents": ["onStartupFinished"],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "modelPricing.refresh",
+        "title": "Model Pricing: Refresh now"
+      },
+      {
+        "command": "modelPricing.open",
+        "title": "Model Pricing: Open dashboard"
+      }
+    ],
+    "configuration": {
+      "title": "Model Pricing",
+      "properties": {
+        "modelPricing.apiBaseUrl": {
+          "type": "string",
+          "default": "https://models.andrea-house.com/api",
+          "description": "Base URL of the model-pricing API"
+        },
+        "modelPricing.refreshSeconds": {
+          "type": "number",
+          "default": 300,
+          "minimum": 30,
+          "description": "Polling interval"
+        },
+        "modelPricing.includeKiloDiscount": {
+          "type": "boolean",
+          "default": true,
+          "description": "Apply Kilo Pass discount when displaying $/Mtok"
+        },
+        "modelPricing.kiloTier": {
+          "type": "string",
+          "enum": ["starter", "pro", "expert"],
+          "default": "pro"
+        },
+        "modelPricing.kiloStreakMonths": {
+          "type": "number",
+          "default": 8,
+          "minimum": 1,
+          "maximum": 120
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p .",
+    "watch": "tsc -p . --watch",
+    "package": "vsce package --no-dependencies"
+  },
+  "devDependencies": {
+    "@types/node": "^22.9.0",
+    "@types/vscode": "^1.95.0",
+    "@vscode/vsce": "^3.2.1",
+    "typescript": "^5.6.3"
+  }
+}

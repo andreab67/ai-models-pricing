@@ -1,0 +1,41 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: refresh-pricing
+spec:
+  schedule: "*/5 * * * *"       # every 5 min
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 5
+  startingDeadlineSeconds: 120
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      activeDeadlineSeconds: 300
+      template:
+        spec:
+          restartPolicy: OnFailure
+          imagePullSecrets:
+            - name: gitlab-regcred
+          containers:
+            - name: refresh
+              image: gitlab.andrea-house.com:5050/root/model-pricing/api:0.1.0
+              command: ["python", "-m", "app.jobs.refresh_pricing"]
+              envFrom:
+                - configMapRef: { name: model-pricing-config }
+                - secretRef:    { name: model-pricing-secrets }
+              resources:
+                requests: { cpu: 50m,  memory: 128Mi }
+                limits:   { cpu: 500m, memory: 384Mi }
+              securityContext:
+                runAsNonRoot: true
+                runAsUser: 1000
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities: { drop: ["ALL"] }
+              volumeMounts:
+                - name: tmp
+                  mountPath: /tmp
+          volumes:
+            - name: tmp
+              emptyDir: {}

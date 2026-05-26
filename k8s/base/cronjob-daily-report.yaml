@@ -1,0 +1,45 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: daily-report
+spec:
+  # 8:00 AM America/Denver = 14:00 UTC (DST) / 15:00 UTC (standard).
+  # k8s CronJob runs in cluster TZ (UTC by default). Pick 14:00 UTC and
+  # accept the 1-hour drift, or use a TZ-aware controller (k8s 1.27+ has
+  # `spec.timeZone`). We use timeZone here — bump to "America/Denver".
+  timeZone: "America/Denver"
+  schedule: "0 8 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 5
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      activeDeadlineSeconds: 600
+      template:
+        spec:
+          restartPolicy: OnFailure
+          imagePullSecrets:
+            - name: gitlab-regcred
+          containers:
+            - name: report
+              image: gitlab.andrea-house.com:5050/root/model-pricing/api:0.1.0
+              command: ["python", "-m", "app.jobs.daily_report"]
+              envFrom:
+                - configMapRef: { name: model-pricing-config }
+                - secretRef:    { name: model-pricing-secrets }
+              resources:
+                requests: { cpu: 50m,  memory: 128Mi }
+                limits:   { cpu: 500m, memory: 384Mi }
+              securityContext:
+                runAsNonRoot: true
+                runAsUser: 1000
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities: { drop: ["ALL"] }
+              volumeMounts:
+                - name: tmp
+                  mountPath: /tmp
+          volumes:
+            - name: tmp
+              emptyDir: {}

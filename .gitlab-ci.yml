@@ -1,0 +1,183 @@
+# GitLab CI for model-pricing.
+# Uses the built-in GitLab Container Registry — no external Harbor needed.
+#
+# Required CI/CD variables (Settings → CI/CD → Variables):
+#   KUBE_CONFIG   base64 of kubeconfig for home cluster (file type, protected)
+#
+# Auto-provided by GitLab:
+#   CI_REGISTRY, CI_REGISTRY_USER, CI_REGISTRY_PASSWORD, CI_REGISTRY_IMAGE
+
+stages:
+  - lint
+  - test
+  - build
+  - scan
+  - publish
+  - deploy
+
+variables:
+  IMAGE_API: "$CI_REGISTRY_IMAGE/api"
+  IMAGE_WEB: "$CI_REGISTRY_IMAGE/web"
+  TRIVY_NO_PROGRESS: "true"
+  DOCKER_BUILDKIT: "1"
+
+# --------------------------------------------------------------------- lint
+lint:api:
+  stage: lint
+  image: python:3.12-slim
+  before_script:
+    - pip install --no-cache-dir ruff==0.7.4
+  script:
+    - ruff check api/
+  rules:
+    - changes: [api/**/*]
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+
+lint:web:
+  stage: lint
+  image: node:20-alpine
+  before_script:
+    - cd web && npm ci --no-audit --no-fund
+  script:
+    - npm run lint
+    - npm run typecheck
+  rules:
+    - changes: [web/**/*]
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+
+lint:k8s:
+  stage: lint
+  image:
+    name: ghcr.io/yannh/kubeconform:latest-alpine
+    entrypoint: [""]
+  script:
+    - find k8s -name "*.yaml" -not -name "secret.example.yaml" -print
+        | xargs -r kubeconform -strict -summary -schema-location default
+            -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json'
+  rules:
+    - changes: [k8s/**/*]
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+
+# --------------------------------------------------------------------- test
+test:api:
+  stage: test
+  image: python:3.12-slim
+  services:
+    - name: postgres:16-alpine
+      alias: postgres
+      variables:
+        POSTGRES_DB: pricing
+        POSTGRES_USER: pricing
+        POSTGRES_PASSWORD: pricing
+    - name: redis:7-alpine
+      alias: redis
+  variables:
+    DATABASE_URL: "postgresql+asyncpg://pricing:pricing@postgres:5432/pricing"
+    REDIS_URL: "redis://redis:6379/0"
+  before_script:
+    - apt-get update && apt-get install -y --no-install-recommends libpq-dev gcc
+    - cd api
+    - pip install --no-cache-dir -e ".[dev]"
+  script:
+    - pytest -q
+  rules:
+    - changes: [api/**/*]
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+
+# -------------------------------------------------------------------- build
+.build_template:
+  stage: build
+  image:
+    name: gcr.io/kaniko-project/executor:v1.23.2-debug
+    entrypoint: [""]
+  before_script:
+    - mkdir -p /kaniko/.docker
+    - |
+      cat > /kaniko/.docker/config.json <<EOF
+      { "auths": { "$CI_REGISTRY": { "auth": "$(printf '%s:%s' "$CI_REGISTRY_USER" "$CI_REGISTRY_PASSWORD" | base64 | tr -d '\n')" } } }
+      EOF
+
+build:api:
+  extends: .build_template
+  script:
+    - /kaniko/executor
+        --context "$CI_PROJECT_DIR/api"
+        --dockerfile "$CI_PROJECT_DIR/api/Dockerfile"
+        --destination "$IMAGE_API:$CI_COMMIT_SHORT_SHA"
+        --destination "$IMAGE_API:latest"
+        --cache=true --cache-ttl=72h
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+    - changes: [api/**/*]
+
+build:web:
+  extends: .build_template
+  script:
+    - /kaniko/executor
+        --context "$CI_PROJECT_DIR/web"
+        --dockerfile "$CI_PROJECT_DIR/web/Dockerfile"
+        --destination "$IMAGE_WEB:$CI_COMMIT_SHORT_SHA"
+        --destination "$IMAGE_WEB:latest"
+        --cache=true --cache-ttl=72h
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+    - changes: [web/**/*]
+
+# --------------------------------------------------------------------- scan
+.trivy_template:
+  stage: scan
+  image:
+    name: aquasec/trivy:0.57.1
+    entrypoint: [""]
+  variables:
+    TRIVY_CACHE_DIR: ".trivycache/"
+  cache:
+    key: trivy-db
+    paths: [.trivycache/]
+  before_script:
+    - trivy --version
+    - trivy image --download-db-only
+
+scan:api:
+  extends: .trivy_template
+  script:
+    - trivy image --exit-code 1 --severity HIGH,CRITICAL --ignore-unfixed
+        "$IMAGE_API:$CI_COMMIT_SHORT_SHA"
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+      changes: [api/**/*]
+
+scan:web:
+  extends: .trivy_template
+  script:
+    - trivy image --exit-code 1 --severity HIGH,CRITICAL --ignore-unfixed
+        "$IMAGE_WEB:$CI_COMMIT_SHORT_SHA"
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+      changes: [web/**/*]
+
+# ------------------------------------------------------------------ deploy
+deploy:prod:
+  stage: deploy
+  image:
+    name: bitnami/kubectl:1.31
+    entrypoint: [""]
+  before_script:
+    - mkdir -p ~/.kube
+    - echo "$KUBE_CONFIG" | base64 -d > ~/.kube/config
+    - chmod 600 ~/.kube/config
+    - kubectl config current-context
+  script:
+    - kubectl -n model-pricing apply -k k8s/overlays/prod
+    - kubectl -n model-pricing set image deployment/api
+        api=$IMAGE_API:$CI_COMMIT_SHORT_SHA
+    - kubectl -n model-pricing set image deployment/web
+        web=$IMAGE_WEB:$CI_COMMIT_SHORT_SHA
+    - kubectl -n model-pricing rollout status deployment/api --timeout=120s
+    - kubectl -n model-pricing rollout status deployment/web --timeout=120s
+  environment:
+    name: production
+    url: https://models.andrea-house.com
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+      when: manual

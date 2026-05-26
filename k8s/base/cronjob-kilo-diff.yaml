@@ -1,0 +1,41 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: kilo-diff
+spec:
+  timeZone: "America/Denver"
+  schedule: "0 7 * * 1"          # Mondays at 07:00 local
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 5
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      activeDeadlineSeconds: 300
+      template:
+        spec:
+          restartPolicy: OnFailure
+          imagePullSecrets:
+            - name: gitlab-regcred
+          containers:
+            - name: diff
+              image: gitlab.andrea-house.com:5050/root/model-pricing/api:0.1.0
+              command: ["python", "-m", "app.jobs.kilo_diff"]
+              envFrom:
+                - configMapRef: { name: model-pricing-config }
+                - secretRef:    { name: model-pricing-secrets }
+              resources:
+                requests: { cpu: 50m,  memory: 128Mi }
+                limits:   { cpu: 250m, memory: 256Mi }
+              securityContext:
+                runAsNonRoot: true
+                runAsUser: 1000
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities: { drop: ["ALL"] }
+              volumeMounts:
+                - name: tmp
+                  mountPath: /tmp
+          volumes:
+            - name: tmp
+              emptyDir: {}

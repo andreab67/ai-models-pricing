@@ -1,0 +1,35 @@
+# Static Kilo Pass tier definitions.
+# Source: https://kilo.ai/pricing (verified 2026-05-25)
+# A weekly CronJob (kilo_diff) hashes the live page and alerts on change.
+
+plans:
+  - tier: starter
+    monthly_usd: 19.00
+    paid_credits_usd: 19.00
+    max_bonus_pct: 0.40       # 40% by month 8 on monthly; 5% baseline +5%/mo
+    annual_usd: 228.00        # 12 × monthly, prepaid
+    annual_bonus_pct: 0.50    # flat 50% bonus on annual
+
+  - tier: pro
+    monthly_usd: 49.00
+    paid_credits_usd: 49.00
+    max_bonus_pct: 0.40
+    annual_usd: 588.00
+    annual_bonus_pct: 0.50
+
+  - tier: expert
+    monthly_usd: 199.00
+    paid_credits_usd: 199.00
+    max_bonus_pct: 0.40
+    annual_usd: 2388.00
+    annual_bonus_pct: 0.50
+
+# Bonus growth model for monthly plans.
+# month 1: 50% welcome bonus
+# month n (n>=2): min(step_pct * n, cap_pct)
+# This matches Kilo's published "40% max bonus unlocked by month 8".
+bonus_growth:
+  welcome_pct: 0.50
+  baseline_pct: 0.05
+  step_pct: 0.05
+  cap_pct: 0.40

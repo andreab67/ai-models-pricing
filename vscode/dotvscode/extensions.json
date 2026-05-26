@@ -1,0 +1,18 @@
+{
+  "recommendations": [
+    "kilocode.kilo-code",
+    "rooveterinaryinc.roo-cline",
+    "anthropic.claude-code",
+    "ms-python.python",
+    "ms-python.vscode-pylance",
+    "charliermarsh.ruff",
+    "esbenp.prettier-vscode",
+    "dbaeumer.vscode-eslint",
+    "bradlc.vscode-tailwindcss",
+    "ms-azuretools.vscode-docker",
+    "ms-kubernetes-tools.vscode-kubernetes-tools",
+    "redhat.vscode-yaml",
+    "tamasfe.even-better-toml",
+    "eamodio.gitlens"
+  ]
+}

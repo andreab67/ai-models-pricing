@@ -1,0 +1,24 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: model-pricing
+commonLabels:
+  app.kubernetes.io/part-of: model-pricing
+  app.kubernetes.io/managed-by: kustomize
+resources:
+  - namespace.yaml
+  - configmap.yaml
+  - secret.example.yaml
+  - api-deployment.yaml
+  - api-service.yaml
+  - web-deployment.yaml
+  - web-service.yaml
+  - ingress.yaml
+  - cronjob-refresh-pricing.yaml
+  - cronjob-daily-report.yaml
+  - cronjob-kilo-diff.yaml
+  - servicemonitor.yaml
+images:
+  - name: gitlab.andrea-house.com:5050/root/model-pricing/api
+    newTag: 0.1.0
+  - name: gitlab.andrea-house.com:5050/root/model-pricing/web
+    newTag: 0.1.0

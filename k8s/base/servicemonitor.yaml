@@ -1,0 +1,15 @@
+# Apply only if Prometheus Operator CRDs are present in the cluster.
+# Remove from kustomization.yaml resources list otherwise.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: api
+  labels:
+    release: prometheus
+spec:
+  selector:
+    matchLabels: { app: api }
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 30s

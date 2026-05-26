@@ -1,0 +1,51 @@
+[project]
+name = "model-pricing-api"
+version = "0.1.0"
+description = "Token pricing optimizer: OpenRouter vs Kilo Code"
+requires-python = ">=3.12"
+dependencies = [
+  "fastapi==0.115.5",
+  "uvicorn[standard]==0.32.1",
+  "httpx==0.27.2",
+  "pydantic==2.9.2",
+  "pydantic-settings==2.6.1",
+  "SQLAlchemy[asyncio]==2.0.36",
+  "asyncpg==0.30.0",
+  "alembic==1.13.3",
+  "redis==5.2.0",
+  "PyYAML==6.0.2",
+  "aiosmtplib==3.0.2",
+  "Jinja2==3.1.4",
+  "beautifulsoup4==4.12.3",
+  "structlog==24.4.0",
+  "prometheus-client==0.21.0",
+  "tenacity==9.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest==8.3.3",
+  "pytest-asyncio==0.24.0",
+  "ruff==0.7.4",
+  "mypy==1.13.0",
+  "respx==0.21.1",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W", "B", "UP", "ASYNC", "S", "RUF"]
+ignore = ["S101"]  # allow asserts in tests
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["app*"]

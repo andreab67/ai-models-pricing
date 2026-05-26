@@ -1,0 +1,59 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: { maxSurge: 1, maxUnavailable: 0 }
+  selector:
+    matchLabels: { app: web }
+  template:
+    metadata:
+      labels: { app: web }
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        seccompProfile: { type: RuntimeDefault }
+      imagePullSecrets:
+        - name: gitlab-regcred
+      containers:
+        - name: web
+          image: gitlab.andrea-house.com:5050/root/model-pricing/web:0.1.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - { containerPort: 3000, name: http }
+          env:
+            - name: API_BASE_URL
+              value: http://api:8000
+            - name: PORT
+              value: "3000"
+            - name: HOSTNAME
+              value: "0.0.0.0"
+          resources:
+            requests: { cpu: 50m,  memory: 128Mi }
+            limits:   { cpu: 500m, memory: 384Mi }
+          readinessProbe:
+            httpGet: { path: /, port: http }
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: { path: /, port: http }
+            initialDelaySeconds: 20
+            periodSeconds: 20
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false  # next standalone writes .next/cache at runtime
+            capabilities: { drop: ["ALL"] }
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: web
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels: { app: web }

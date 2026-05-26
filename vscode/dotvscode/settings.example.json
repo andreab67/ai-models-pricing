@@ -1,0 +1,24 @@
+{
+  "editor.formatOnSave": true,
+  "[python]": {
+    "editor.defaultFormatter": "charliermarsh.ruff",
+    "editor.codeActionsOnSave": { "source.organizeImports": "explicit" }
+  },
+  "[typescript]":      { "editor.defaultFormatter": "esbenp.prettier-vscode" },
+  "[typescriptreact]": { "editor.defaultFormatter": "esbenp.prettier-vscode" },
+  "[json]":            { "editor.defaultFormatter": "esbenp.prettier-vscode" },
+  "[yaml]":            { "editor.defaultFormatter": "redhat.vscode-yaml" },
+  "python.analysis.typeCheckingMode": "basic",
+  "ruff.lint.run": "onSave",
+  "files.exclude": {
+    "**/__pycache__":  true,
+    "**/.pytest_cache":true,
+    "**/.ruff_cache":  true,
+    "**/.next":        true
+  },
+  "modelPricing.apiBaseUrl": "https://models.andrea-house.com/api",
+  "modelPricing.refreshSeconds": 300,
+  "modelPricing.includeKiloDiscount": true,
+  "modelPricing.kiloTier": "pro",
+  "modelPricing.kiloStreakMonths": 8
+}
