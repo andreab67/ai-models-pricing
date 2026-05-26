@@ -1,6 +1,7 @@
 import "./globals.css";
 
 import type { Metadata } from "next";
+import Link from "next/link";
 import { ThemeProvider } from "next-themes";
 
 import { ThemeToggle } from "@/components/ThemeToggle";
@@ -21,13 +22,13 @@ export default function RootLayout({
         <ThemeProvider attribute="class" defaultTheme="dark" enableSystem>
           <header className="border-b border-border">
             <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
-              <a href="/" className="font-semibold tracking-tight">
+              <Link href="/" className="font-semibold tracking-tight">
                 models.andrea-house.com
-              </a>
+              </Link>
               <nav className="flex items-center gap-4 text-sm">
-                <a href="/" className="hover:underline">Dashboard</a>
-                <a href="/trends" className="hover:underline">Trends</a>
-                <a href="/about" className="hover:underline">About</a>
+                <Link href="/" className="hover:underline">Dashboard</Link>
+                <Link href="/trends" className="hover:underline">Trends</Link>
+                <Link href="/about" className="hover:underline">About</Link>
                 <ThemeToggle />
               </nav>
             </div>
