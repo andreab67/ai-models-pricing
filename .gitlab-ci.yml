@@ -179,6 +179,12 @@ deploy:prod:
         api=$IMAGE_API:$CI_COMMIT_SHORT_SHA
     - kubectl -n model-pricing set image deployment/web
         web=$IMAGE_WEB:$CI_COMMIT_SHORT_SHA
+    - kubectl -n model-pricing set image cronjob/refresh-pricing
+        refresh=$IMAGE_API:$CI_COMMIT_SHORT_SHA
+    - kubectl -n model-pricing set image cronjob/daily-report
+        report=$IMAGE_API:$CI_COMMIT_SHORT_SHA
+    - kubectl -n model-pricing set image cronjob/kilo-diff
+        diff=$IMAGE_API:$CI_COMMIT_SHORT_SHA
     - kubectl -n model-pricing rollout status deployment/api --timeout=120s
     - kubectl -n model-pricing rollout status deployment/web --timeout=120s
   environment:

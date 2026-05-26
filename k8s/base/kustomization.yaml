@@ -17,8 +17,3 @@ resources:
   - cronjob-daily-report.yaml
   - cronjob-kilo-diff.yaml
   - servicemonitor.yaml
-images:
-  - name: gitlab.andrea-house.com:5050/root/model-pricing/api
-    newTag: 0.1.0
-  - name: gitlab.andrea-house.com:5050/root/model-pricing/web
-    newTag: 0.1.0

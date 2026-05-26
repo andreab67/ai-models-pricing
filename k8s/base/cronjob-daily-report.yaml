@@ -23,7 +23,7 @@ spec:
             - name: gitlab-regcred
           containers:
             - name: report
-              image: gitlab.andrea-house.com:5050/root/model-pricing/api:0.1.0
+              image: gitlab.andrea-house.com:5050/root/model-pricing/api:latest
               command: ["python", "-m", "app.jobs.daily_report"]
               envFrom:
                 - configMapRef: { name: model-pricing-config }

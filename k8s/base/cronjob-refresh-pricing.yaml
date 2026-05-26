@@ -19,7 +19,7 @@ spec:
             - name: gitlab-regcred
           containers:
             - name: refresh
-              image: gitlab.andrea-house.com:5050/root/model-pricing/api:0.1.0
+              image: gitlab.andrea-house.com:5050/root/model-pricing/api:latest
               command: ["python", "-m", "app.jobs.refresh_pricing"]
               envFrom:
                 - configMapRef: { name: model-pricing-config }
