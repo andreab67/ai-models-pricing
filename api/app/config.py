@@ -68,6 +68,7 @@ class Settings(BaseSettings):
 
     # --- external account keys -------------------------------------------
     openrouter_api_key: str = Field(default="")
+    kilo_api_key: str = Field(default="")
     openai_api_key: str = Field(default="")
     anthropic_api_key: str = Field(default="")
 
