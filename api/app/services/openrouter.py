@@ -51,8 +51,9 @@ def _normalize(raw_model: dict[str, Any]) -> ModelPricing | None:
     prompt = _to_mtok(pricing.get("prompt"))
     completion = _to_mtok(pricing.get("completion"))
 
-    # Skip zero-priced rows that aren't actually "free" models — these are
-    # usually placeholder/deprecated entries.
+    if prompt < 0 or completion < 0:
+        return None
+
     model_id = raw_model.get("id")
     if not model_id:
         return None
