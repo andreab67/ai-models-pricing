@@ -12,7 +12,7 @@ def _m(
     mid: str,
     p: float,
     c: float,
-    ctx: int = 200_000,
+    ctx: int = 1_000_000,
     tools: bool = True,
 ) -> ModelPricing:
     return ModelPricing(
@@ -40,7 +40,7 @@ def test_excludes_models_without_tool_support() -> None:
 
 
 def test_excludes_small_context() -> None:
-    models = [_m("a/b", 0.1, 0.5, ctx=8_000), _m("c/d", 0.2, 0.6, ctx=200_000)]
+    models = [_m("a/b", 0.1, 0.5, ctx=200_000), _m("c/d", 0.2, 0.6, ctx=1_000_000)]
     ranked = ranker.top_n(models, n=10)
     assert {r.model.id for r in ranked} == {"c/d"}
 
