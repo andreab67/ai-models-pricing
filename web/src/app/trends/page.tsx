@@ -1,11 +1,23 @@
 "use client";
 
-import { PricingTrends } from "@/components/PricingTrends";
+import { useState } from "react";
 
-export default function TrendsPage() {
+import { ModelDetailModal } from "@/components/ModelDetailModal";
+import { ModelTable } from "@/components/ModelTable";
+
+export default function AllModelsPage() {
+  const [selected, setSelected] = useState<string | null>(null);
+
   return (
     <div className="space-y-6">
-      <PricingTrends />
+      <ModelTable onSelect={setSelected} />
+      <ModelDetailModal
+        modelId={selected}
+        onClose={() => setSelected(null)}
+        kiloTier="starter"
+        kiloStreakMonths={1}
+        kiloAnnual={false}
+      />
     </div>
   );
 }

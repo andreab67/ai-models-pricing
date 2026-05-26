@@ -27,7 +27,7 @@ export default function RootLayout({
               </Link>
               <nav className="flex items-center gap-4 text-sm">
                 <Link href="/" className="hover:underline">Dashboard</Link>
-                <Link href="/trends" className="hover:underline">Trends</Link>
+                <Link href="/trends" className="hover:underline">All Models</Link>
                 <Link href="/about" className="hover:underline">About</Link>
                 <ThemeToggle />
               </nav>
