@@ -34,8 +34,7 @@ export default function TrendsPage() {
           <select
             value={modelId ?? ""}
             onChange={(e) => setModelId(e.target.value || null)}
-            className="ml-2 rounded border bg-transparent p-1 text-sm"
-            style={{ borderColor: "rgb(var(--border))" }}
+            className="ml-2 rounded border border-border bg-transparent p-1 text-sm"
           >
             <option value="">Select…</option>
             {top?.map((r) => (

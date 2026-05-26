@@ -61,8 +61,7 @@ export function ModelTable({ onSelect }: Props) {
           placeholder="Filter…"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          className="w-48 rounded border bg-transparent px-2 py-1 text-sm"
-          style={{ borderColor: "rgb(var(--border))" }}
+          className="w-48 rounded border border-border bg-transparent px-2 py-1 text-sm"
         />
       </div>
       {isLoading && <p className="text-sm opacity-60">Loading…</p>}
@@ -71,7 +70,7 @@ export function ModelTable({ onSelect }: Props) {
         <div className="overflow-auto">
           <table className="w-full text-sm">
             <thead className="text-left">
-              <tr className="border-b" style={{ borderColor: "rgb(var(--border))" }}>
+              <tr className="border-b border-border">
                 <Th label="Model" k="name" sort={sort} asc={asc} toggle={toggleSort} />
                 <Th
                   label="In $/Mtok"
@@ -104,8 +103,7 @@ export function ModelTable({ onSelect }: Props) {
               {rows.slice(0, 200).map((m) => (
                 <tr
                   key={m.id}
-                  className="cursor-pointer border-b hover:bg-black/5 dark:hover:bg-white/5"
-                  style={{ borderColor: "rgb(var(--border))" }}
+                  className="cursor-pointer border-b border-border hover:bg-black/5 dark:hover:bg-white/5"
                   onClick={() => onSelect(m.id)}
                 >
                   <td className="px-2 py-1">

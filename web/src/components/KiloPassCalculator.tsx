@@ -32,8 +32,7 @@ export function KiloPassCalculator({
           <select
             value={tier}
             onChange={(e) => setTier(e.target.value)}
-            className="mt-1 block w-full rounded border bg-transparent p-1 text-sm"
-            style={{ borderColor: "rgb(var(--border))" }}
+            className="mt-1 block w-full rounded border border-border bg-transparent p-1 text-sm"
           >
             <option value="starter">Starter ($19/mo)</option>
             <option value="pro">Pro ($49/mo)</option>
@@ -49,8 +48,7 @@ export function KiloPassCalculator({
             max={120}
             onChange={(e) => setStreakMonths(parseInt(e.target.value || "1", 10))}
             disabled={annual}
-            className="mt-1 block w-full rounded border bg-transparent p-1 text-sm disabled:opacity-50"
-            style={{ borderColor: "rgb(var(--border))" }}
+            className="mt-1 block w-full rounded border border-border bg-transparent p-1 text-sm disabled:opacity-50"
           />
         </label>
         <label className="flex items-end gap-2 text-sm">
@@ -97,11 +95,7 @@ function Stat({
 }) {
   return (
     <div
-      className="rounded border px-2 py-1"
-      style={{
-        borderColor: "rgb(var(--border))",
-        background: highlight ? "rgba(34,197,94,0.08)" : undefined,
-      }}
+      className={`rounded border border-border px-2 py-1${highlight ? " bg-accent/[0.08]" : ""}`}
     >
       <div className="text-xs opacity-60">{label}</div>
       <div className="font-mono text-sm">{value}</div>

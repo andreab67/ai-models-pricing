@@ -132,6 +132,7 @@ build:web:
     entrypoint: [""]
   variables:
     TRIVY_CACHE_DIR: ".trivycache/"
+    TRIVY_INSECURE: "true"
   cache:
     key: trivy-db
     paths: [.trivycache/]
