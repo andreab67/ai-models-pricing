@@ -123,7 +123,9 @@ async def _check_openai() -> AccountProviderUsage:
                 headers={"Authorization": f"Bearer {regular_key or admin_key}"},
             )
             if resp.status_code == 401:
-                return AccountProviderUsage(provider="openai", configured=True, error="API key invalid")
+                return AccountProviderUsage(
+                    provider="openai", configured=True, error="API key invalid"
+                )
             resp.raise_for_status()
         except Exception as exc:
             log.warning("openai_check_failed", error=str(exc))
@@ -174,7 +176,9 @@ async def _check_anthropic() -> AccountProviderUsage:
                 headers={"x-api-key": regular_key or admin_key, "anthropic-version": "2023-06-01"},
             )
             if resp.status_code == 401:
-                return AccountProviderUsage(provider="anthropic", configured=True, error="API key invalid")
+                return AccountProviderUsage(
+                    provider="anthropic", configured=True, error="API key invalid"
+                )
             resp.raise_for_status()
         except Exception as exc:
             log.warning("anthropic_check_failed", error=str(exc))
