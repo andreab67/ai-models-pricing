@@ -109,7 +109,7 @@ export function ModelDetailModal({
             <div className="overflow-auto">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="border-b" style={{ borderColor: "rgb(var(--border))" }}>
+                  <tr className="border-b border-border">
                     <th className="px-2 py-1 text-left">Channel</th>
                     <th className="px-2 py-1 text-right">In $/Mtok</th>
                     <th className="px-2 py-1 text-right">Out $/Mtok</th>
@@ -120,8 +120,7 @@ export function ModelDetailModal({
                   {comparison.channels.map((c) => (
                     <tr
                       key={c.channel}
-                      className="border-b"
-                      style={{ borderColor: "rgb(var(--border))" }}
+                      className="border-b border-border"
                     >
                       <td className="px-2 py-1">{CHANNEL_LABEL[c.channel]}</td>
                       <td className="px-2 py-1 text-right font-mono">
@@ -173,10 +172,7 @@ export function ModelDetailModal({
 
 function Meta({ label, value }: { label: string; value: string }) {
   return (
-    <div
-      className="rounded border px-2 py-1"
-      style={{ borderColor: "rgb(var(--border))" }}
-    >
+    <div className="rounded border border-border px-2 py-1">
       <div className="text-xs opacity-60">{label}</div>
       <div className="font-mono text-sm">{value}</div>
     </div>
