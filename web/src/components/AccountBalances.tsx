@@ -53,7 +53,7 @@ function ProviderCard({ account }: { account: AccountProviderUsage }) {
         <>
           {account.spent_usd != null ? (
             <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
-              <span className="text-zinc-400">Total used</span>
+              <span className="text-zinc-400">{account.period_start ? `Since ${account.period_start}` : "Total used"}</span>
               <span className="text-right font-mono">{fmtUsd(account.spent_usd)}</span>
 
               {account.limit_usd != null && (
