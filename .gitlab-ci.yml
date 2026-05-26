@@ -52,7 +52,7 @@ lint:k8s:
     entrypoint: [""]
   script:
     - find k8s -name "*.yaml" -not -name "secret.example.yaml" -print
-        | xargs -r kubeconform -strict -summary -schema-location default
+        | xargs -r /kubeconform -strict -summary -schema-location default
             -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json'
   rules:
     - changes: [k8s/**/*]
