@@ -21,7 +21,7 @@ class Settings(BaseSettings):
     environment: str = Field(default="dev")
     log_level: str = Field(default="INFO")
     api_host: str = Field(default="0.0.0.0")  # noqa: S104 — intentional in container
-    api_port: int = Field(default=8000)
+    api_port: int = Field(default=8000, validation_alias="server_port")
     cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:3000"])
 
     # --- openrouter -------------------------------------------------------
