@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -67,6 +67,23 @@ class KiloProjection(BaseModel):
     bonus_pct: float
     bonus_credits_usd: float
     total_effective_credits_usd: float
+
+
+class AccountProviderUsage(BaseModel):
+    provider: Literal["openai", "anthropic"]
+    configured: bool = False
+    plan: str | None = None
+    limit_usd: float | None = None
+    spent_usd: float | None = None
+    remaining_usd: float | None = None
+    period_start: str | None = None
+    error: str | None = None
+
+
+class AccountsUsage(BaseModel):
+    openai: AccountProviderUsage
+    anthropic: AccountProviderUsage
+    fetched_at: datetime
 
 
 class DailyTopFive(BaseModel):

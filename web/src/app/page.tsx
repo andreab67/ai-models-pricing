@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 
+import { AccountBalances } from "@/components/AccountBalances";
 import { KiloPassCalculator } from "@/components/KiloPassCalculator";
 import { ModelDetailModal } from "@/components/ModelDetailModal";
 import { ModelTable } from "@/components/ModelTable";
@@ -15,6 +16,7 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-6">
+      <AccountBalances />
       <KiloPassCalculator
         tier={tier}
         setTier={setTier}
