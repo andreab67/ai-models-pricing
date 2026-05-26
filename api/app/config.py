@@ -61,7 +61,7 @@ class Settings(BaseSettings):
     # bias toward output cost (longer in coding) and require min context.
     rank_input_weight: float = Field(default=0.30)
     rank_output_weight: float = Field(default=0.70)
-    rank_min_context_tokens: int = Field(default=64_000)
+    rank_min_context_tokens: int = Field(default=1_000_000)
     rank_max_input_price: float = Field(default=10.0)   # USD / Mtok
     rank_max_output_price: float = Field(default=40.0)  # USD / Mtok
     rank_top_n: int = Field(default=10)

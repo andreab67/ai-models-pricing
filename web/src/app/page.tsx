@@ -25,10 +25,8 @@ export default function DashboardPage() {
         annual={annual}
         setAnnual={setAnnual}
       />
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_2fr]">
-        <TopTenRanking onSelect={setSelected} />
-        <ModelTable onSelect={setSelected} />
-      </div>
+      <TopTenRanking onSelect={setSelected} />
+      <ModelTable onSelect={setSelected} />
       <ModelDetailModal
         modelId={selected}
         onClose={() => setSelected(null)}
