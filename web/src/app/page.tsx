@@ -6,6 +6,7 @@ import { AccountBalances } from "@/components/AccountBalances";
 import { KiloPassCalculator } from "@/components/KiloPassCalculator";
 import { ModelDetailModal } from "@/components/ModelDetailModal";
 import { ModelTable } from "@/components/ModelTable";
+import { PricingTrends } from "@/components/PricingTrends";
 import { TopTenRanking } from "@/components/TopTenRanking";
 
 export default function DashboardPage() {
@@ -26,6 +27,7 @@ export default function DashboardPage() {
         setAnnual={setAnnual}
       />
       <TopTenRanking onSelect={setSelected} />
+      <PricingTrends />
       <ModelTable onSelect={setSelected} />
       <ModelDetailModal
         modelId={selected}

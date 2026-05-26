@@ -135,6 +135,26 @@ export function useAccountUsage() {
   });
 }
 
+export interface ModelActivityItem {
+  model_id: string;
+  requests: number;
+  prompt_tokens: number;
+  completion_tokens: number;
+  cost_usd: number;
+}
+
+export interface ActivityResponse {
+  items: ModelActivityItem[];
+  fetched_at: string;
+}
+
+export function useActivity() {
+  return useSWR<ActivityResponse>("/api/accounts/activity", fetcher, {
+    ...defaultConfig,
+    refreshInterval: 900_000, // 15 min
+  });
+}
+
 export function fmtUsd(n: number): string {
   if (n === 0) return "$0";
   if (n < 0.01) return `$${n.toFixed(4)}`;
