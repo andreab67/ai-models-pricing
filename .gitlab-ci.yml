@@ -164,7 +164,7 @@ scan:web:
 deploy:prod:
   stage: deploy
   image:
-    name: bitnami/kubectl:1.31
+    name: registry.k8s.io/kubectl:v1.31.0
     entrypoint: [""]
   before_script:
     - mkdir -p ~/.kube
