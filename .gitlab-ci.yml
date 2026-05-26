@@ -38,7 +38,7 @@ lint:web:
   stage: lint
   image: node:20-alpine
   before_script:
-    - cd web && npm ci --no-audit --no-fund --legacy-peer-deps
+    - cd web && npm ci --no-audit --no-fund
   script:
     - npm run lint
     - npm run typecheck
