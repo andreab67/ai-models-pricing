@@ -30,6 +30,7 @@ lint:api:
   script:
     - ruff check api/
   rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
     - changes: [api/**/*]
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
 
@@ -42,6 +43,7 @@ lint:web:
     - npm run lint
     - npm run typecheck
   rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
     - changes: [web/**/*]
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
 
@@ -55,6 +57,7 @@ lint:k8s:
         | xargs -r /kubeconform -strict -summary -schema-location default
             -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json'
   rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
     - changes: [k8s/**/*]
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
 
@@ -80,6 +83,7 @@ test:api:
   script:
     - pytest -q
   rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
     - changes: [api/**/*]
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
 
