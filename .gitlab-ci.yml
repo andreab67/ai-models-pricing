@@ -133,6 +133,8 @@ build:web:
   variables:
     TRIVY_CACHE_DIR: ".trivycache/"
     TRIVY_INSECURE: "true"
+    TRIVY_USERNAME: "$CI_REGISTRY_USER"
+    TRIVY_PASSWORD: "$CI_REGISTRY_PASSWORD"
   cache:
     key: trivy-db
     paths: [.trivycache/]
