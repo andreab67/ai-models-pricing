@@ -6,6 +6,7 @@ import asyncio
 import sys
 
 from app.logging import configure_logging, get_logger
+from app.services.cache import cache
 from app.services.openrouter import refresh_pricing
 
 
@@ -19,6 +20,8 @@ async def _main() -> int:
     except Exception as exc:
         log.error("refresh_pricing_failed", error=str(exc), exc_info=True)
         return 1
+    finally:
+        await cache.close()
 
 
 if __name__ == "__main__":

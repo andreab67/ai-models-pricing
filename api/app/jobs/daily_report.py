@@ -12,6 +12,7 @@ from jinja2 import Environment, FileSystemLoader, select_autoescape
 from app.config import get_settings
 from app.logging import configure_logging, get_logger
 from app.services import openrouter, ranker
+from app.services.cache import cache
 from app.services.kilo import effective_discount
 from app.services.mailer import send
 
@@ -88,6 +89,8 @@ async def _main() -> int:
     except Exception as exc:
         log.error("daily_report_failed", error=str(exc), exc_info=True)
         return 1
+    finally:
+        await cache.close()
 
 
 if __name__ == "__main__":
