@@ -19,6 +19,8 @@ export function ModelTable({ onSelect }: Props) {
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<SortKey>("completion_usd_per_mtok");
   const [asc, setAsc] = useState(true);
+  const [pageSize, setPageSize] = useState<number | null>(25);
+  const [page, setPage] = useState(0);
 
   const rows = useMemo<ModelPricing[]>(() => {
     if (!data) return [];
@@ -44,33 +46,56 @@ export function ModelTable({ onSelect }: Props) {
     return sorted;
   }, [data, query, sort, asc]);
 
+  const totalPages = pageSize === null ? 1 : Math.ceil(rows.length / pageSize);
+  const visibleRows = pageSize === null ? rows : rows.slice(page * pageSize, (page + 1) * pageSize);
+
   const toggleSort = (k: SortKey) => {
     if (sort === k) setAsc((v) => !v);
     else {
       setSort(k);
       setAsc(true);
     }
+    setPage(0);
+  };
+
+  const changePageSize = (v: number | null) => {
+    setPageSize(v);
+    setPage(0);
   };
 
   return (
     <section className="card rounded-lg p-4">
       <div className="mb-3 flex items-center justify-between gap-3">
         <h2 className="text-lg font-semibold">All models</h2>
-        <input
-          type="search"
-          placeholder="Filter…"
-          aria-label="Filter models"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          className="w-48 rounded border border-border bg-transparent px-2 py-1 text-sm"
-        />
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-1 text-xs">
+            {([25, 50, 100, null] as (number | null)[]).map((v) => (
+              <button
+                key={v ?? "all"}
+                type="button"
+                onClick={() => changePageSize(v)}
+                className={`rounded px-2 py-0.5 ${pageSize === v ? "bg-blue-600 text-white" : "bg-zinc-800 text-zinc-300 hover:bg-zinc-700"}`}
+              >
+                {v ?? "All"}
+              </button>
+            ))}
+          </div>
+          <input
+            type="search"
+            placeholder="Filter…"
+            aria-label="Filter models"
+            value={query}
+            onChange={(e) => { setQuery(e.target.value); setPage(0); }}
+            className="w-48 rounded border border-border bg-transparent px-2 py-1 text-sm"
+          />
+        </div>
       </div>
       {isLoading && <p className="text-sm opacity-60">Loading…</p>}
       {error && <p className="text-sm text-red-500">Failed: {String(error)}</p>}
       {!isLoading && data && (
-        <div className="max-h-[600px] overflow-auto">
+        <div>
           <table className="w-full text-sm">
-            <thead className="sticky top-0 z-10 bg-[rgb(var(--card))] text-left">
+            <thead className="text-left">
               <tr className="border-b border-border">
                 <Th label="Model" k="name" sort={sort} asc={asc} toggle={toggleSort} />
                 <Th
@@ -101,7 +126,7 @@ export function ModelTable({ onSelect }: Props) {
               </tr>
             </thead>
             <tbody>
-              {rows.slice(0, 200).map((m) => (
+              {visibleRows.map((m) => (
                 <tr
                   key={m.id}
                   className="cursor-pointer border-b border-border hover:bg-black/5 dark:hover:bg-white/5"
@@ -127,10 +152,31 @@ export function ModelTable({ onSelect }: Props) {
               ))}
             </tbody>
           </table>
-          {rows.length > 200 && (
-            <p className="mt-2 text-xs opacity-60">
-              Showing first 200 of {rows.length}. Refine the filter to narrow.
-            </p>
+          {pageSize !== null && totalPages > 1 && (
+            <div className="mt-3 flex items-center justify-between text-xs text-muted">
+              <span>{rows.length} models · page {page + 1} of {totalPages}</span>
+              <div className="flex gap-1">
+                <button
+                  type="button"
+                  disabled={page === 0}
+                  onClick={() => setPage((p) => p - 1)}
+                  className="rounded px-2 py-0.5 bg-zinc-800 text-zinc-300 hover:bg-zinc-700 disabled:opacity-30"
+                >
+                  ← Prev
+                </button>
+                <button
+                  type="button"
+                  disabled={page >= totalPages - 1}
+                  onClick={() => setPage((p) => p + 1)}
+                  className="rounded px-2 py-0.5 bg-zinc-800 text-zinc-300 hover:bg-zinc-700 disabled:opacity-30"
+                >
+                  Next →
+                </button>
+              </div>
+            </div>
+          )}
+          {pageSize === null && (
+            <p className="mt-2 text-xs opacity-60">{rows.length} models</p>
           )}
         </div>
       )}
