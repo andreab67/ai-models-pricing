@@ -10,8 +10,8 @@ import { TopTenRanking } from "@/components/TopTenRanking";
 
 export default function DashboardPage() {
   const [selected, setSelected] = useState<string | null>(null);
-  const [tier, setTier] = useState("pro");
-  const [streakMonths, setStreakMonths] = useState(8);
+  const [tier, setTier] = useState("starter");
+  const [streakMonths, setStreakMonths] = useState(1);
   const [annual, setAnnual] = useState(false);
 
   return (

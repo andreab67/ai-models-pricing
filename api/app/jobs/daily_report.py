@@ -48,12 +48,12 @@ async def _main() -> int:
                 cheapest.prompt_usd_per_mtok, cheapest.completion_usd_per_mtok
             )
             # Apply Kilo Pass discount at the user's typical streak
-            discount = effective_discount("pro", 8, annual=False)
+            discount = effective_discount("starter", 1, annual=False)
             cheapest_cost *= (1 - discount)
             savings = max(0.0, baseline_cost - cheapest_cost)
             assumption = (
                 f"{BASELINE_INPUT_MTOK}M in + {BASELINE_OUTPUT_MTOK}M out "
-                f"vs. {baseline.name}, with Kilo Pass (pro, m8)"
+                f"vs. {baseline.name}, with Kilo Pass (starter, m1)"
             )
 
         env = Environment(
