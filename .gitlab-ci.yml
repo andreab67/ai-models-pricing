@@ -122,7 +122,7 @@ build:web:
         --dockerfile "$CI_PROJECT_DIR/web/Dockerfile"
         --destination "$IMAGE_WEB:$CI_COMMIT_SHORT_SHA"
         --destination "$IMAGE_WEB:latest"
-        --cache=true --cache-ttl=72h --no-cache-filter=deps
+        --cache=true --cache-ttl=72h
         --skip-tls-verify
   rules:
     - if: '$CI_COMMIT_BRANCH == "main"'
