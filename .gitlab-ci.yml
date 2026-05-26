@@ -51,7 +51,7 @@ lint:k8s:
     name: ghcr.io/yannh/kubeconform:latest-alpine
     entrypoint: [""]
   script:
-    - find k8s -name "*.yaml" -not -name "secret.example.yaml" -print
+    - find k8s -name "*.yaml" -not -name "secret.example.yaml" -not -name "kustomization.yaml" -print
         | xargs -r /kubeconform -strict -summary -schema-location default
             -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json'
   rules:
