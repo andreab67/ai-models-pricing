@@ -59,6 +59,7 @@ export function ModelTable({ onSelect }: Props) {
         <input
           type="search"
           placeholder="Filter…"
+          aria-label="Filter models"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           className="w-48 rounded border border-border bg-transparent px-2 py-1 text-sm"
@@ -67,9 +68,9 @@ export function ModelTable({ onSelect }: Props) {
       {isLoading && <p className="text-sm opacity-60">Loading…</p>}
       {error && <p className="text-sm text-red-500">Failed: {String(error)}</p>}
       {!isLoading && data && (
-        <div className="overflow-auto">
+        <div className="max-h-[600px] overflow-auto">
           <table className="w-full text-sm">
-            <thead className="text-left">
+            <thead className="sticky top-0 z-10 bg-[rgb(var(--card))] text-left">
               <tr className="border-b border-border">
                 <Th label="Model" k="name" sort={sort} asc={asc} toggle={toggleSort} />
                 <Th
