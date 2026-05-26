@@ -23,7 +23,14 @@ export function PricingTrends() {
 
   const { data: history } = useHistory(modelId, 30);
 
-  if (!isLoading && items.length === 0) return null;
+  if (!isLoading && items.length === 0) return (
+    <section className="card rounded-lg p-4 w-full">
+      <h2 className="mb-1 text-lg font-semibold">Pricing Trends</h2>
+      <p className="text-sm opacity-60">
+        No OpenRouter activity found — start using models to see price trends here.
+      </p>
+    </section>
+  );
 
   const chartData =
     history?.map((h) => ({

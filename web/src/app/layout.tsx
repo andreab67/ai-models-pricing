@@ -21,7 +21,7 @@ export default function RootLayout({
       <body className="min-h-screen font-sans antialiased">
         <ThemeProvider attribute="class" defaultTheme="dark" enableSystem>
           <header className="border-b border-border">
-            <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
+            <div className="mx-auto flex max-w-[1600px] items-center justify-between px-4 py-3">
               <Link href="/" className="font-semibold tracking-tight">
                 models.andrea-house.com
               </Link>
@@ -33,7 +33,7 @@ export default function RootLayout({
               </nav>
             </div>
           </header>
-          <main className="mx-auto max-w-6xl px-4 py-6">{children}</main>
+          <main className="mx-auto max-w-[1600px] px-4 py-6">{children}</main>
           <footer className="mt-12 border-t border-border py-6 text-center text-xs text-muted">
             OpenRouter feed · Kilo Pass tier math · self-hosted on k8s-home
           </footer>
