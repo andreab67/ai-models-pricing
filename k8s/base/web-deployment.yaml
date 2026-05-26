@@ -3,7 +3,7 @@ kind: Deployment
 metadata:
   name: web
 spec:
-  replicas: 2
+  replicas: 1
   strategy:
     type: RollingUpdate
     rollingUpdate: { maxSurge: 1, maxUnavailable: 0 }
@@ -22,7 +22,7 @@ spec:
         - name: gitlab-regcred
       containers:
         - name: web
-          image: gitlab.andrea-house.com:5050/root/model-pricing/web:0.1.0
+          image: gitlab.andrea-house.com:5050/root/model-pricing/web:latest
           imagePullPolicy: IfNotPresent
           ports:
             - { containerPort: 3000, name: http }
@@ -54,6 +54,6 @@ kind: PodDisruptionBudget
 metadata:
   name: web
 spec:
-  minAvailable: 1
+  minAvailable: 0
   selector:
     matchLabels: { app: web }

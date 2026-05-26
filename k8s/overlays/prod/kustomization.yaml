@@ -3,19 +3,8 @@ kind: Kustomization
 namespace: model-pricing
 resources:
   - ../../base
-patches:
-  - target: { kind: Deployment, name: api }
-    patch: |
-      - op: replace
-        path: /spec/replicas
-        value: 3
-  - target: { kind: Deployment, name: web }
-    patch: |
-      - op: replace
-        path: /spec/replicas
-        value: 3
 images:
   - name: gitlab.andrea-house.com:5050/root/model-pricing/api
-    newTag: 0.1.0
+    newTag: latest
   - name: gitlab.andrea-house.com:5050/root/model-pricing/web
-    newTag: 0.1.0
+    newTag: latest
