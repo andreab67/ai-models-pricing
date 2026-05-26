@@ -109,6 +109,30 @@ export function useHistory(modelId: string | null, days: number = 30) {
   return useSWR<ModelPricing[]>(url, fetcher, defaultConfig);
 }
 
+export interface AccountProviderUsage {
+  provider: "openai" | "anthropic";
+  configured: boolean;
+  plan: string | null;
+  limit_usd: number | null;
+  spent_usd: number | null;
+  remaining_usd: number | null;
+  period_start: string | null;
+  error: string | null;
+}
+
+export interface AccountsUsage {
+  openai: AccountProviderUsage;
+  anthropic: AccountProviderUsage;
+  fetched_at: string;
+}
+
+export function useAccountUsage() {
+  return useSWR<AccountsUsage>("/api/accounts/usage", fetcher, {
+    ...defaultConfig,
+    refreshInterval: 300_000,
+  });
+}
+
 export function fmtUsd(n: number): string {
   if (n === 0) return "$0";
   if (n < 0.01) return `$${n.toFixed(4)}`;

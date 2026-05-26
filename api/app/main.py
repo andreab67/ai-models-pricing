@@ -22,6 +22,7 @@ from starlette.responses import Response
 from app import __version__
 from app.config import get_settings
 from app.logging import configure_logging, get_logger
+from app.routes import accounts as accounts_routes
 from app.routes import compare as compare_routes
 from app.routes import health, models_api
 from app.services.cache import cache
@@ -89,6 +90,7 @@ app.include_router(health.router)
 app.include_router(models_api.router)
 app.include_router(compare_routes.router)
 app.include_router(compare_routes.kilo_router)
+app.include_router(accounts_routes.router)
 
 
 @app.get("/metrics")

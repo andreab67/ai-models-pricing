@@ -66,6 +66,10 @@ class Settings(BaseSettings):
     rank_max_output_price: float = Field(default=40.0)  # USD / Mtok
     rank_top_n: int = Field(default=10)
 
+    # --- external account keys -------------------------------------------
+    openai_api_key: str = Field(default="")
+    anthropic_api_key: str = Field(default="")
+
     # --- comparison wrappers ---------------------------------------------
     openrouter_payg_fee_pct: float = Field(default=0.055)
     openrouter_byok_fee_pct: float = Field(default=0.05)
