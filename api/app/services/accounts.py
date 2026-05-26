@@ -9,7 +9,7 @@ import httpx
 
 from app.config import get_settings
 from app.logging import get_logger
-from app.schemas import AccountProviderUsage, AccountsUsage
+from app.schemas import AccountProviderUsage, AccountsUsage, ActivityResponse, ModelActivityItem
 from app.services.cache import cache
 from app.services.kilo import load_plans
 
@@ -220,6 +220,58 @@ async def _check_anthropic() -> AccountProviderUsage:
         except Exception as exc:
             log.warning("anthropic_costs_failed", error=str(exc))
             return AccountProviderUsage(provider="anthropic", configured=True, error=str(exc)[:80])
+
+
+_ACTIVITY_CACHE_KEY = "accounts:activity"
+_ACTIVITY_CACHE_TTL = 900  # 15 min
+
+
+async def get_activity() -> ActivityResponse:
+    cached = await cache.get(_ACTIVITY_CACHE_KEY)
+    if cached:
+        return ActivityResponse.model_validate(cached)
+
+    key = _settings.openrouter_api_key
+    if not key:
+        return ActivityResponse(items=[], fetched_at=datetime.now(UTC))
+
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        try:
+            resp = await client.get(
+                "https://openrouter.ai/api/v1/activity",
+                headers={"Authorization": f"Bearer {key}"},
+            )
+            resp.raise_for_status()
+            raw = resp.json()
+            log.debug("openrouter_activity_raw", keys=list(raw.keys()))
+
+            # Response shape: {"data": [{model_id, requests, prompt_tokens,
+            #   completion_tokens, total_cost / cost / ...}, ...]}
+            entries = raw.get("data") or raw.get("activity") or []
+            items: list[ModelActivityItem] = []
+            for e in entries:
+                model_id = e.get("model") or e.get("model_id") or ""
+                if not model_id:
+                    continue
+                items.append(ModelActivityItem(
+                    model_id=model_id,
+                    requests=int(e.get("requests") or e.get("count") or 0),
+                    prompt_tokens=int(e.get("prompt_tokens") or e.get("input_tokens") or 0),
+                    completion_tokens=int(
+                        e.get("completion_tokens") or e.get("output_tokens") or 0
+                    ),
+                    cost_usd=float(
+                        e.get("total_cost") or e.get("cost") or e.get("usage") or 0
+                    ),
+                ))
+            items.sort(key=lambda x: x.cost_usd, reverse=True)
+            result = ActivityResponse(items=items, fetched_at=datetime.now(UTC))
+        except Exception as exc:
+            log.warning("openrouter_activity_failed", error=str(exc))
+            result = ActivityResponse(items=[], fetched_at=datetime.now(UTC))
+
+    await cache.set(_ACTIVITY_CACHE_KEY, result.model_dump(mode="json"), ttl=_ACTIVITY_CACHE_TTL)
+    return result
 
 
 async def get_usage() -> AccountsUsage:

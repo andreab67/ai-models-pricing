@@ -88,6 +88,19 @@ class AccountsUsage(BaseModel):
     fetched_at: datetime
 
 
+class ModelActivityItem(BaseModel):
+    model_id: str
+    requests: int
+    prompt_tokens: int
+    completion_tokens: int
+    cost_usd: float
+
+
+class ActivityResponse(BaseModel):
+    items: list[ModelActivityItem]
+    fetched_at: datetime
+
+
 class DailyTopFive(BaseModel):
     generated_at: datetime
     models: list[RankedModel]

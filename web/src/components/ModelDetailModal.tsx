@@ -13,7 +13,7 @@ import {
   YAxis,
 } from "recharts";
 
-import { fmtUsd, useComparison, useHistory } from "@/lib/api";
+import { fmtUsd, useActivity, useComparison, useHistory } from "@/lib/api";
 
 const CHANNEL_LABEL: Record<string, string> = {
   openrouter_payg: "OpenRouter PAYG",
@@ -44,6 +44,8 @@ export function ModelDetailModal({
     kiloAnnual,
   );
   const { data: history } = useHistory(modelId, 30);
+  const { data: activity } = useActivity();
+  const myUsage = activity?.items.find((i) => i.model_id === modelId);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
@@ -102,6 +104,20 @@ export function ModelDetailModal({
               <Meta label="Tools" value={comparison.model.supports_tools ? "yes" : "no"} />
               <Meta label="Vision" value={comparison.model.supports_vision ? "yes" : "no"} />
             </div>
+
+            {myUsage && (
+              <>
+                <h3 className="mt-4 mb-2 text-sm font-semibold uppercase opacity-70">
+                  Your usage (last 30 days)
+                </h3>
+                <div className="grid grid-cols-2 gap-2 text-sm md:grid-cols-4">
+                  <Meta label="Spent" value={fmtUsd(myUsage.cost_usd)} />
+                  <Meta label="Requests" value={myUsage.requests.toLocaleString()} />
+                  <Meta label="In tokens" value={`${(myUsage.prompt_tokens / 1000).toFixed(1)}k`} />
+                  <Meta label="Out tokens" value={`${(myUsage.completion_tokens / 1000).toFixed(1)}k`} />
+                </div>
+              </>
+            )}
 
             <h3 className="mt-4 mb-2 text-sm font-semibold uppercase opacity-70">
               Channel comparison
