@@ -6,15 +6,6 @@ import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-
-class _HealthCheckFilter(logging.Filter):
-    def filter(self, record: logging.LogRecord) -> bool:
-        msg = record.getMessage()
-        return "/readyz" not in msg and "/healthz" not in msg
-
-
-logging.getLogger("uvicorn.access").addFilter(_HealthCheckFilter())
-
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from prometheus_client import (
@@ -39,6 +30,15 @@ from app.services.cache import cache
 
 configure_logging()
 log = get_logger(__name__)
+
+
+class _HealthCheckFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        msg = record.getMessage()
+        return "/readyz" not in msg and "/healthz" not in msg
+
+
+logging.getLogger("uvicorn.access").addFilter(_HealthCheckFilter())
 _settings = get_settings()
 
 REQ_COUNT = Counter(
