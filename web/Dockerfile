@@ -12,6 +12,11 @@ COPY . .
 ENV NEXT_TELEMETRY_DISABLED=1 \
     API_BASE_URL=http://api:8000
 RUN npm run build
+RUN echo "=== picomatch package.json files in standalone ===" && \
+    find .next/standalone -name "package.json" -path "*/picomatch/*" -exec sh -c 'echo "$1:"; cat "$1"' _ {} \; && \
+    echo "=== checking for 4.0.3 ===" && \
+    ! grep -r '"version": "4.0.3"' .next/standalone/node_modules/picomatch/ 2>/dev/null && \
+    echo "standalone picomatch OK"
 
 FROM node:22-alpine AS runner
 WORKDIR /app
