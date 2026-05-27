@@ -45,10 +45,15 @@ function ProviderCard({ account }: { account: AccountProviderUsage }) {
       ) : account.error ? (
         <p className="text-xs text-red-400">{account.error}</p>
       ) : isKilo ? (
-        <p className="text-xs text-zinc-400">
-          Live spend not available via API — check{" "}
-          <span className="text-zinc-300">kilo.ai dashboard</span>
-        </p>
+        <div className="space-y-1">
+          {account.model_count != null && (
+            <p className="text-sm font-mono text-emerald-400">{account.model_count} models available</p>
+          )}
+          <p className="text-xs text-zinc-500">
+            Spend tracking not available via API — check{" "}
+            <span className="text-zinc-400">kilo.ai dashboard</span>
+          </p>
+        </div>
       ) : (
         <>
           {account.spent_usd != null ? (

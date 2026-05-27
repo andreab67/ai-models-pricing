@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Query
 
-from app.schemas import KiloPlan, KiloProjection, ModelComparison
-from app.services import kilo, openrouter
+from app.schemas import KiloPlan, KiloProjection, ModelComparison, ModelPricing
+from app.services import kilo, kilo_gateway, openrouter
 from app.services.pricing_calculator import compare
 
 router = APIRouter(prefix="/compare", tags=["compare"])
@@ -30,6 +30,19 @@ kilo_router = APIRouter(prefix="/kilo", tags=["kilo"])
 @kilo_router.get("/plans", response_model=list[KiloPlan])
 async def list_plans() -> list[KiloPlan]:
     return kilo.load_plans()
+
+
+@kilo_router.get("/models", response_model=list[ModelPricing])
+async def list_kilo_models() -> list[ModelPricing]:
+    return await kilo_gateway.fetch_models()
+
+
+@kilo_router.get("/models/{model_id:path}", response_model=ModelPricing)
+async def get_kilo_model(model_id: str) -> ModelPricing:
+    m = await kilo_gateway.get_model(model_id)
+    if m is None:
+        raise HTTPException(status_code=404, detail=f"model not available on Kilo: {model_id}")
+    return m
 
 
 @kilo_router.get("/projection", response_model=KiloProjection)
