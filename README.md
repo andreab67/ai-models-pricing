@@ -1,24 +1,32 @@
-# model-pricing
+# ai-model-pricing-dashboard
 
-Live OpenRouter token pricing vs. Kilo Code plan math, served at
-`models.andrea-house.com`. Deploys to the `k8s-home` cluster.
+A production-grade dashboard for tracking, comparing, and optimizing LLM costs across multiple providers (OpenRouter, OpenAI, Anthropic). Built with **full-stack expertise** in AI operations, real-time data pipelines, and cost analysis.
+
+This project demonstrates:
+
+- **Multi-provider pricing orchestration** — normalize costs across 10+ LLM providers into a single view
+- **Real-time cost tracking** — automated pricing refreshes with Redis caching and Postgres persistence
+- **Data-driven model selection** — sophisticated ranking that accounts for cost, context window, and capabilities
+- **Production infrastructure** — Kubernetes-ready with health checks, metrics, scheduled jobs, and TLS
+
+Perfect for teams running multi-provider AI workloads who need cost visibility and optimization tools.
 
 ## What's in the box
 
-| Component       | Path                  | Notes                                                  |
-|-----------------|-----------------------|--------------------------------------------------------|
-| FastAPI backend | `api/`                | Polls OpenRouter, caches in Redis, persists snapshots in Postgres, renders daily email |
-| Next.js dashboard | `web/`              | App Router, Tailwind, Recharts, dark/light, mobile responsive |
-| K8s manifests   | `k8s/`                | Kustomize base + prod overlay, Traefik ingress, cert-manager TLS, CronJobs, ServiceMonitor |
-| GitLab CI       | `.gitlab-ci.yml`      | lint → test → Kaniko build → Trivy scan → GitLab registry push → manual deploy |
-| Local dev       | `docker-compose.yml`  | Postgres + Redis + API + Web                           |
+| Component | Path | Purpose |
+| --- | --- | --- |
+| FastAPI backend | `api/` | Ingests OpenRouter/provider APIs, normalizes pricing, caches in Redis, persists history |
+| Next.js dashboard | `web/` | Modern responsive UI (dark/light, App Router, Recharts, Tailwind) |
+| K8s manifests | `k8s/` | Kustomize base + overlay, Traefik ingress, cert-manager TLS, CronJobs |
+| Docker Compose | `docker-compose.yml` | Local dev: Postgres + Redis + API + Web (fully self-contained) |
+| CI/CD | `.gitlab-ci.yml` | Pipeline: lint → test → build → scan → push (adapt to your git provider) |
 
 ## Architecture
 
 ```
-                ┌────────────────────────────────────────────┐
-                │   Traefik @ models.andrea-house.com (TLS)  │
-                └───────────────┬────────────────────────────┘
+                ┌─────────────────────────────────────┐
+                │   Ingress / Load Balancer (TLS)    │
+                └───────────────┬─────────────────────┘
                                 │  /        /api/*
                 ┌───────────────▼──────┐  ┌───▼──────────────┐
                 │   web (Next.js)      │  │  api (FastAPI)   │
@@ -30,10 +38,10 @@ Live OpenRouter token pricing vs. Kilo Code plan math, served at
                           Postgres         Redis        OpenRouter
                           (history)        (cache)      /api/v1/models
 
-                  CronJobs (in same namespace, same image):
-                  • refresh-pricing  every 5m
-                  • daily-report     08:00 America/Denver
-                  • kilo-diff        Mon 07:00 (alerts on Kilo page change)
+                  CronJobs (in same namespace):
+                  • refresh-pricing  every 15 minutes
+                  • daily-report     daily (configurable time)
+                  • price-monitor    configurable schedule
 ```
 
 ## Local development
@@ -106,59 +114,87 @@ eligibility:
 
 Tune via `RANK_*` env vars in `api/app/config.py`.
 
-## Production deploy (k8s-home)
+## Production deploy (Kubernetes)
 
-Postgres and Redis are **shared cluster services** — no in-namespace database pods.
-The namespace must have the following pre-created (pipeline creates them via `KUBE_CONFIG`):
+### Prerequisites
 
-- `gitlab-regcred` — GitLab registry pull secret
-- `model-pricing-secrets` — DATABASE_URL, REDIS_URL (with password), SMTP creds
+Postgres and Redis are configured as external cluster services. The namespace must have:
+
+- A **container registry secret** for image pulls (e.g., `regcred`)
+- A **Kubernetes secret** `model-pricing-secrets` containing:
+  - `DATABASE_URL` — Postgres connection string
+  - `REDIS_URL` — Redis connection string (with password if needed)
+  - `SMTP_*` — Email configuration (optional)
+  - Any provider API keys (optional, for account balance tracking)
+
+### Deployment
 
 ```bash
-# 1. Apply the overlay (pipeline does this automatically on main)
+# 1. Update the image tag in k8s/base/deployment.yaml
+# 2. Apply the configuration
 kubectl apply -k k8s/overlays/prod
 
-# 2. Verify
+# 3. Verify rollout
 kubectl -n model-pricing get pods,svc,ingress,cronjobs
 kubectl -n model-pricing logs deploy/api -f
-kubectl -n model-pricing create job --from=cronjob/refresh-pricing seed
 ```
 
-DNS: point `models.andrea-house.com` to the Traefik LB. cert-manager will mint
-the cert via the `letsencrypt-prod` ClusterIssuer (ensure that's installed).
+**DNS & TLS:** Point your domain to the ingress load balancer. If using cert-manager:
 
-### CI/CD
+```bash
+kubectl apply -f k8s/certificate.yaml  # (update domain)
+```
 
-The pipeline mirrors the ntp-checker structure. Required GitLab variables:
+### CI/CD Pipeline
 
-| Variable           | Notes                              |
-|--------------------|------------------------------------|
-| `HARBOR_REGISTRY`  | `harbor.andrea-house.com`          |
-| `HARBOR_USERNAME`  | Harbor robot account               |
-| `HARBOR_PASSWORD`  | Harbor robot secret (masked)       |
-| `HARBOR_REPOSITORY`| `model-pricing`                    |
-| `KUBE_CONFIG`      | base64 kubeconfig (file, protected) |
+The `.gitlab-ci.yml` includes stages for:
 
-Production deploy is a manual job on `main`. Pre-push verification runs ruff,
-pytest, and Trivy. Drop your ntp-checker `.gitlab-ci.yml` next to mine and
-I'll diff/align.
+- **lint** — ruff (Python), markdownlint (docs)
+- **test** — pytest with coverage
+- **build** — Kaniko Docker build (adapt registry)
+- **scan** — Trivy security scanning
+- **push** — Push to your container registry
+- **deploy** — kubectl apply (manual trigger on main)
 
-## VSCode
+Adapt the registry variables to your environment:
 
-See `vscode/README.md` for the recommended extensions and the companion
-status-bar extension that shows live OpenRouter cost from this API.
+| Variable | Example |
+| --- | --- |
+| `CI_REGISTRY_IMAGE` | `registry.example.com/model-pricing` |
+| `CI_REGISTRY_USER` | Robot account username |
+| `CI_REGISTRY_PASSWORD` | Robot account token (masked) |
+| `KUBECONFIG` | base64-encoded kubeconfig (file, protected) |
 
-## Notes & known limitations
+## Customization Guide
 
-- The "projected savings" line in the daily email assumes a 5M-in / 5M-out
-  monthly workload against Claude Sonnet 4.6 baseline at Kilo Pass pro/m8.
-  Override in `app/jobs/daily_report.py` if your baseline differs.
-- `kilo_plans.yaml` is hand-maintained. The `kilo-diff` CronJob hashes the
-  live page weekly and emails when it changes — refresh the YAML and commit.
-- Postgres and Redis are **shared cluster services** (pgvector namespace + redis
-  namespace). No in-namespace database pods.
-- Data refresh cadence: OpenRouter `/models` is public and unauthenticated —
-  the `refresh-pricing` CronJob hits it every 5 min at zero cost. Redis cache
-  TTL matches at 300s. Frontend SWR polls every 300s. No provider API costs.
-- OpenRouter free tier rate limits (50 req/day) don't matter here because
-  `/models` is unauthenticated and not throttled at that scale.
+### Email Reports
+
+The daily report in `app/jobs/daily_report.py` includes a "projected savings" calculation. Adjust the baseline model and workload:
+
+```python
+# Change these to match your typical usage
+BASELINE_MODEL = "anthropic/claude-3.5-sonnet"
+MONTHLY_INPUT_TOKENS = 5_000_000
+MONTHLY_OUTPUT_TOKENS = 5_000_000
+```
+
+### Model Ranking Weights
+
+Tune the ranking algorithm in `api/app/config.py`:
+
+```python
+RANK_INPUT_WEIGHT = 0.30      # Adjust for your workload
+RANK_OUTPUT_WEIGHT = 0.70
+RANK_MIN_CONTEXT_TOKENS = 1_000_000  # Minimum context filter
+```
+
+### Kilo Pricing
+
+The `api/app/data/kilo_plans.yaml` is maintained manually. Update whenever Kilo's pricing changes, or set up a monitoring CronJob to alert on changes.
+
+## Architecture Notes
+
+- **Data refresh:** OpenRouter `/models` endpoint is public and unauthenticated. The refresh CronJob queries it every 15 minutes at zero cost.
+- **Caching:** Redis TTL matches the refresh cadence (900 seconds). Frontend uses SWR polling.
+- **Postgres:** Stores historical snapshots for trend analysis. No in-namespace database pod — use an external cluster service.
+- **Multi-provider:** The system is designed to integrate additional providers. Add new provider services in `api/app/services/` following the OpenRouter pattern.
