@@ -28,7 +28,7 @@ export function TopTenRanking({ onSelect }: Props) {
         <div className="w-full overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-zinc-700 text-xs text-zinc-400">
+              <tr className="border-b border-border text-xs text-muted">
                 <th className="pb-2 text-left w-8">#</th>
                 <th className="pb-2 text-left">Model</th>
                 <th className="pb-2 text-right pr-4">Context</th>
@@ -41,8 +41,10 @@ export function TopTenRanking({ onSelect }: Props) {
               {data.map((r) => (
                 <tr
                   key={r.model.id}
+                  tabIndex={0}
                   onClick={() => onSelect(r.model.id)}
-                  className="border-b border-zinc-800 cursor-pointer hover:bg-black/5 dark:hover:bg-white/5"
+                  onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && (e.preventDefault(), onSelect(r.model.id))}
+                  className="border-b border-border cursor-pointer hover:bg-black/5 dark:hover:bg-white/5 focus:outline-none focus-visible:bg-accent/10"
                 >
                   <td className="py-2 font-mono text-xs opacity-50">#{r.rank}</td>
                   <td className="py-2 font-medium pr-4">{r.model.name}</td>

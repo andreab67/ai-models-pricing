@@ -68,13 +68,13 @@ export function ModelTable({ onSelect }: Props) {
       <div className="mb-3 flex items-center justify-between gap-3">
         <h2 className="text-lg font-semibold">All models</h2>
         <div className="flex items-center gap-3">
-          <div className="flex items-center gap-1 text-xs">
+          <div className="flex items-center gap-1 text-xs" role="group" aria-label="Page size">
             {([25, 50, 100, null] as (number | null)[]).map((v) => (
               <button
                 key={v ?? "all"}
                 type="button"
                 onClick={() => changePageSize(v)}
-                className={`rounded px-2 py-0.5 ${pageSize === v ? "bg-blue-600 text-white" : "bg-zinc-800 text-zinc-300 hover:bg-zinc-700"}`}
+                className={`rounded px-2 py-0.5 ${pageSize === v ? "bg-blue-600 text-white" : "bg-border text-fg/80 hover:bg-border/70"}`}
               >
                 {v ?? "All"}
               </button>
@@ -86,7 +86,7 @@ export function ModelTable({ onSelect }: Props) {
             aria-label="Filter models"
             value={query}
             onChange={(e) => { setQuery(e.target.value); setPage(0); }}
-            className="w-48 rounded border border-border bg-transparent px-2 py-1 text-sm"
+            className="w-48 rounded border border-border bg-card text-fg px-2 py-1 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-accent"
           />
         </div>
       </div>
@@ -94,64 +94,78 @@ export function ModelTable({ onSelect }: Props) {
       {error && <p className="text-sm text-red-500">Failed: {String(error)}</p>}
       {!isLoading && data && (
         <div>
-          <table className="w-full text-sm">
-            <thead className="text-left">
-              <tr className="border-b border-border">
-                <Th label="Model" k="name" sort={sort} asc={asc} toggle={toggleSort} />
-                <Th
-                  label="In $/Mtok"
-                  k="prompt_usd_per_mtok"
-                  sort={sort}
-                  asc={asc}
-                  toggle={toggleSort}
-                  numeric
-                />
-                <Th
-                  label="Out $/Mtok"
-                  k="completion_usd_per_mtok"
-                  sort={sort}
-                  asc={asc}
-                  toggle={toggleSort}
-                  numeric
-                />
-                <Th
-                  label="Context"
-                  k="context_length"
-                  sort={sort}
-                  asc={asc}
-                  toggle={toggleSort}
-                  numeric
-                />
-                <th className="px-2 py-1 text-right">Tools</th>
-              </tr>
-            </thead>
-            <tbody>
-              {visibleRows.map((m) => (
-                <tr
-                  key={m.id}
-                  className="cursor-pointer border-b border-border hover:bg-black/5 dark:hover:bg-white/5"
-                  onClick={() => onSelect(m.id)}
-                >
-                  <td className="px-2 py-1">
-                    <div className="font-medium">{m.name}</div>
-                    <div className="font-mono text-xs opacity-60">{m.id}</div>
-                  </td>
-                  <td className="px-2 py-1 text-right font-mono">
-                    {fmtUsd(m.prompt_usd_per_mtok)}
-                  </td>
-                  <td className="px-2 py-1 text-right font-mono">
-                    {fmtUsd(m.completion_usd_per_mtok)}
-                  </td>
-                  <td className="px-2 py-1 text-right font-mono">
-                    {(m.context_length ?? 0).toLocaleString()}
-                  </td>
-                  <td className="px-2 py-1 text-right">
-                    {m.supports_tools ? "✓" : "—"}
-                  </td>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="text-left">
+                <tr className="border-b border-border">
+                  <Th label="Model" k="name" sort={sort} asc={asc} toggle={toggleSort} />
+                  <Th
+                    label="In $/Mtok"
+                    k="prompt_usd_per_mtok"
+                    sort={sort}
+                    asc={asc}
+                    toggle={toggleSort}
+                    numeric
+                  />
+                  <Th
+                    label="Out $/Mtok"
+                    k="completion_usd_per_mtok"
+                    sort={sort}
+                    asc={asc}
+                    toggle={toggleSort}
+                    numeric
+                  />
+                  <Th
+                    label="Context"
+                    k="context_length"
+                    sort={sort}
+                    asc={asc}
+                    toggle={toggleSort}
+                    numeric
+                  />
+                  <th className="px-2 py-1 text-right">Tools</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {visibleRows.length === 0 ? (
+                  <tr>
+                    <td colSpan={5} className="px-2 py-6 text-center text-sm text-muted">
+                      No models match &ldquo;{query}&rdquo;
+                    </td>
+                  </tr>
+                ) : (
+                  visibleRows.map((m) => (
+                    <tr
+                      key={m.id}
+                      tabIndex={0}
+                      className="cursor-pointer border-b border-border hover:bg-black/5 dark:hover:bg-white/5 focus:outline-none focus-visible:bg-accent/10"
+                      onClick={() => onSelect(m.id)}
+                      onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && (e.preventDefault(), onSelect(m.id))}
+                    >
+                      <td className="px-2 py-1">
+                        <div className="font-medium">{m.name}</div>
+                        <div className="font-mono text-xs opacity-60">{m.id}</div>
+                      </td>
+                      <td className="px-2 py-1 text-right font-mono">
+                        {fmtUsd(m.prompt_usd_per_mtok)}
+                      </td>
+                      <td className="px-2 py-1 text-right font-mono">
+                        {fmtUsd(m.completion_usd_per_mtok)}
+                      </td>
+                      <td className="px-2 py-1 text-right font-mono">
+                        {m.context_length ? m.context_length.toLocaleString() : "—"}
+                      </td>
+                      <td className="px-2 py-1 text-right">
+                        <span aria-label={m.supports_tools ? "Supported" : "Not supported"}>
+                          {m.supports_tools ? "✓" : "—"}
+                        </span>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
           {pageSize !== null && totalPages > 1 && (
             <div className="mt-3 flex items-center justify-between text-xs text-muted">
               <span>{rows.length} models · page {page + 1} of {totalPages}</span>
@@ -160,7 +174,7 @@ export function ModelTable({ onSelect }: Props) {
                   type="button"
                   disabled={page === 0}
                   onClick={() => setPage((p) => p - 1)}
-                  className="rounded px-2 py-0.5 bg-zinc-800 text-zinc-300 hover:bg-zinc-700 disabled:opacity-30"
+                  className="rounded px-2 py-0.5 bg-border text-fg/80 hover:bg-border/70 disabled:opacity-30"
                 >
                   ← Prev
                 </button>
@@ -168,7 +182,7 @@ export function ModelTable({ onSelect }: Props) {
                   type="button"
                   disabled={page >= totalPages - 1}
                   onClick={() => setPage((p) => p + 1)}
-                  className="rounded px-2 py-0.5 bg-zinc-800 text-zinc-300 hover:bg-zinc-700 disabled:opacity-30"
+                  className="rounded px-2 py-0.5 bg-border text-fg/80 hover:bg-border/70 disabled:opacity-30"
                 >
                   Next →
                 </button>

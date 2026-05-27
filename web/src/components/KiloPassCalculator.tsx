@@ -21,6 +21,9 @@ export function KiloPassCalculator({
 }: Props) {
   const { data, isLoading, error } = useKiloProjection(tier, streakMonths, annual);
 
+  const selectCls =
+    "mt-1 block w-full rounded border border-border bg-card text-fg p-1 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-accent";
+
   return (
     <div className="card rounded-lg p-4">
       <h3 className="mb-3 text-sm font-semibold tracking-wide uppercase opacity-70">
@@ -32,7 +35,7 @@ export function KiloPassCalculator({
           <select
             value={tier}
             onChange={(e) => setTier(e.target.value)}
-            className="mt-1 block w-full rounded border border-border bg-transparent p-1 text-sm"
+            className={selectCls}
           >
             <option value="starter">Starter ($19/mo)</option>
             <option value="pro">Pro ($49/mo)</option>
@@ -48,14 +51,15 @@ export function KiloPassCalculator({
             max={120}
             onChange={(e) => setStreakMonths(parseInt(e.target.value || "1", 10))}
             disabled={annual}
-            className="mt-1 block w-full rounded border border-border bg-transparent p-1 text-sm disabled:opacity-50"
+            className="mt-1 block w-full rounded border border-border bg-card text-fg p-1 text-sm disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent"
           />
         </label>
-        <label className="flex items-end gap-2 text-sm">
+        <label className="flex items-center gap-2 text-sm md:items-end md:pb-1">
           <input
             type="checkbox"
             checked={annual}
             onChange={(e) => setAnnual(e.target.checked)}
+            className="h-4 w-4 accent-accent"
           />
           Annual plan (flat 50% bonus)
         </label>
