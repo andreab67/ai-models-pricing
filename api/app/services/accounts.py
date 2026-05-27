@@ -228,6 +228,66 @@ _ACTIVITY_CACHE_KEY = "accounts:activity"
 _ACTIVITY_CACHE_TTL = 900  # 15 min
 
 
+async def get_openai_activity() -> ActivityResponse:
+    """Fetch OpenAI costs by model from the cost report API (last 30 days)."""
+    cache_key = "accounts:openai_activity"
+    cache_ttl = 900  # 15 min
+
+    cached = await cache.get(cache_key)
+    if cached:
+        return ActivityResponse.model_validate(cached)
+
+    admin_key = _settings.openai_admin_key
+    if not admin_key:
+        return ActivityResponse(items=[], fetched_at=datetime.now(UTC))
+
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        try:
+            start_time = int((datetime.now(UTC) - timedelta(days=30)).timestamp())
+            resp = await client.get(
+                "https://api.openai.com/v1/organization/costs",
+                headers={"Authorization": f"Bearer {admin_key}"},
+                params={"start_time": start_time, "limit": 100, "bucket_width": "1d"},
+            )
+            resp.raise_for_status()
+            buckets = resp.json().get("data", [])
+
+            # Aggregate by model from cost results
+            agg: dict[str, ModelActivityItem] = {}
+            for bucket in buckets:
+                for result in bucket.get("results", []):
+                    model_id = result.get("line_item_json", {}).get("model", "unknown")
+                    if not model_id:
+                        continue
+                    cost = float(result.get("amount", {}).get("value", 0))
+                    if model_id in agg:
+                        existing = agg[model_id]
+                        agg[model_id] = ModelActivityItem(
+                            model_id=model_id,
+                            requests=existing.requests,  # OpenAI API doesn't provide request count
+                            prompt_tokens=existing.prompt_tokens,
+                            completion_tokens=existing.completion_tokens,
+                            cost_usd=round(existing.cost_usd + cost, 4),
+                        )
+                    else:
+                        agg[model_id] = ModelActivityItem(
+                            model_id=model_id,
+                            requests=0,
+                            prompt_tokens=0,
+                            completion_tokens=0,
+                            cost_usd=round(cost, 4),
+                        )
+
+            items = sorted(agg.values(), key=lambda x: x.cost_usd, reverse=True)
+            result = ActivityResponse(items=items, fetched_at=datetime.now(UTC))
+        except Exception as exc:
+            log.warning("openai_activity_failed", error=str(exc))
+            result = ActivityResponse(items=[], fetched_at=datetime.now(UTC))
+
+    await cache.set(cache_key, result.model_dump(mode="json"), ttl=cache_ttl)
+    return result
+
+
 async def get_activity() -> ActivityResponse:
     cached = await cache.get(_ACTIVITY_CACHE_KEY)
     if cached:
