@@ -18,9 +18,9 @@ export function TopTenRanking({ onSelect }: Props) {
 
   return (
     <section className="card rounded-lg p-4 w-full">
-      <h2 className="mb-1 text-lg font-semibold">Top 10 coding models</h2>
+      <h2 className="mb-1 text-lg font-semibold">Top 10 Coding Models (1M+ context)</h2>
       <p className="mb-4 text-xs opacity-60">
-        Ranked by blended cost (30% input / 70% output) · tool support · ≥1M context
+        Ranked by blended cost (30% input / 70% output) · tool calling support · ≥1M tokens context window
       </p>
       {isLoading && <p className="text-sm opacity-60">Loading…</p>}
       {error && <p className="text-sm text-red-500">Failed to load: {String(error)}</p>}
