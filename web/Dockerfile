@@ -2,7 +2,8 @@
 FROM node:22-alpine AS deps
 WORKDIR /app
 COPY package.json package-lock.json ./
-RUN npm ci --no-audit --no-fund
+RUN npm cache clean --force && npm ci --no-audit --no-fund
+RUN node -e "const v=require('./node_modules/picomatch/package.json').version; if(v!=='4.0.4'){process.exit(1)} console.log('picomatch',v,'OK')"
 
 FROM node:22-alpine AS builder
 WORKDIR /app
