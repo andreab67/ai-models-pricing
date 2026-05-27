@@ -163,6 +163,13 @@ export function useActivity() {
   });
 }
 
+export function useOpenAIActivity() {
+  return useSWR<ActivityResponse>("/api/accounts/openai-activity", fetcher, {
+    ...defaultConfig,
+    refreshInterval: 900_000, // 15 min
+  });
+}
+
 export function fmtUsd(n: number): string {
   if (n === 0) return "$0";
   if (n < 0.01) return `$${n.toFixed(4)}`;

@@ -20,3 +20,9 @@ async def usage() -> AccountsUsage:
 async def activity() -> ActivityResponse:
     """Return per-model usage from OpenRouter activity (last 30 days)."""
     return await accounts.get_activity()
+
+
+@router.get("/openai-activity", response_model=ActivityResponse)
+async def openai_activity() -> ActivityResponse:
+    """Return per-model costs from OpenAI cost report (last 30 days)."""
+    return await accounts.get_openai_activity()
