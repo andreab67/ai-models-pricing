@@ -81,7 +81,7 @@ async def _check_kilo() -> AccountProviderUsage:
             limit_usd=limit_usd,
         )
 
-    # Validate key via models ping — no balance endpoint exists in the Kilo gateway API
+    # Validate key and get model count — no balance endpoint in Kilo gateway API
     async with httpx.AsyncClient(timeout=10.0) as client:
         try:
             resp = await client.get(
@@ -94,11 +94,13 @@ async def _check_kilo() -> AccountProviderUsage:
                     limit_usd=limit_usd, error="API key invalid",
                 )
             resp.raise_for_status()
+            model_count = len(resp.json().get("data") or [])
             return AccountProviderUsage(
                 provider="kilo",
                 configured=True,
                 plan=plan_label,
                 limit_usd=limit_usd,
+                model_count=model_count or None,
             )
         except Exception as exc:
             log.warning("kilo_check_failed", error=str(exc))

@@ -77,6 +77,7 @@ class AccountProviderUsage(BaseModel):
     spent_usd: float | None = None
     remaining_usd: float | None = None
     period_start: str | None = None
+    model_count: int | None = None
     error: str | None = None
 
 

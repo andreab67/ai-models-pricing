@@ -117,6 +117,7 @@ export interface AccountProviderUsage {
   spent_usd: number | null;
   remaining_usd: number | null;
   period_start: string | null;
+  model_count: number | null;
   error: string | null;
 }
 
@@ -146,6 +147,13 @@ export interface ModelActivityItem {
 export interface ActivityResponse {
   items: ModelActivityItem[];
   fetched_at: string;
+}
+
+export function useKiloModels() {
+  return useSWR<ModelPricing[]>("/api/kilo/models", fetcher, {
+    ...defaultConfig,
+    refreshInterval: 900_000, // 15 min
+  });
 }
 
 export function useActivity() {
