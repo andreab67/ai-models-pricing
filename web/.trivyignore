@@ -1,0 +1,6 @@
+# CVE-2026-33671: picomatch ReDoS
+# Trivy false-positive: next.js bundles picomatch in dist/compiled/picomatch/
+# with no version field. Trivy fingerprints it as 4.0.3 but the actual
+# node_modules/picomatch is pinned to 4.0.4 via package.json override.
+# The compiled copy inside next is not reachable from user code.
+CVE-2026-33671
