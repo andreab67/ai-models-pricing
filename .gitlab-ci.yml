@@ -161,6 +161,7 @@ scan:web:
   allow_failure: true
   script:
     - trivy image --exit-code 1 --severity HIGH,CRITICAL --ignore-unfixed
+        --ignorefile "$CI_PROJECT_DIR/web/.trivyignore"
         "$IMAGE_WEB:$CI_COMMIT_SHORT_SHA"
   rules:
     - if: '$CI_COMMIT_BRANCH == "main"'
