@@ -163,7 +163,7 @@ export default function AboutPage() {
         </p>
         <div className="flex gap-3 justify-center pt-4">
           <a
-            href="mailto:andreab@greenyogainc.com"
+            href="https://www.greenyogainc.com/book"
             className="px-6 py-2 bg-accent text-accent-foreground rounded-lg font-semibold hover:opacity-90 transition"
           >
             Get in Touch
