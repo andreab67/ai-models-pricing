@@ -19,58 +19,78 @@ function ProviderCard({ account }: { account: AccountProviderUsage }) {
       : null;
 
   const usedColor =
-    usedPct == null   ? "text-zinc-500"   :
-    usedPct > 85      ? "text-red-400"    :
-    usedPct > 60      ? "text-yellow-400" :
+    usedPct == null   ? "text-muted"       :
+    usedPct > 85      ? "text-red-400"     :
+    usedPct > 60      ? "text-yellow-400"  :
     "text-emerald-400";
 
   return (
-    <div className="rounded-lg border border-zinc-700 bg-zinc-900 p-4 space-y-3">
+    <div className="rounded-lg border border-border bg-card p-4 space-y-3">
       <div className="flex items-center justify-between">
         <span className={`font-semibold ${meta.color}`}>{meta.name}</span>
         {account.plan && (
-          <span className="text-xs text-zinc-400 bg-zinc-800 px-2 py-0.5 rounded">
+          <span className="text-xs text-muted bg-border px-2 py-0.5 rounded">
             {account.plan}
           </span>
         )}
       </div>
 
       {!account.configured ? (
-        <p className="text-xs text-zinc-500">
+        <p className="text-xs text-muted">
           Key not configured —{" "}
-          <span className="text-zinc-400">
+          <span className="text-fg/70">
             add {account.provider.toUpperCase()}_API_KEY to cluster secret
           </span>
         </p>
       ) : account.error ? (
         <p className="text-xs text-red-400">{account.error}</p>
       ) : isKilo ? (
-        <div className="space-y-1">
-          {account.model_count != null && (
-            <p className="text-sm font-mono text-emerald-400">{account.model_count} models available</p>
-          )}
-          <p className="text-xs text-zinc-500">
-            Spend tracking not available via API — check{" "}
-            <span className="text-zinc-400">kilo.ai dashboard</span>
+        <div className="space-y-2">
+          <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
+            {account.model_count != null && (
+              <>
+                <span className="text-muted text-xs">Models available</span>
+                <span className="text-right font-mono text-emerald-400 font-semibold">
+                  {account.model_count.toLocaleString()}
+                </span>
+              </>
+            )}
+            {account.limit_usd != null && (
+              <>
+                <span className="text-muted text-xs">Credits / month</span>
+                <span className="text-right font-mono">{fmtUsd(account.limit_usd)}</span>
+              </>
+            )}
+          </div>
+          <p className="text-xs text-muted/70">
+            Spend tracking not in API —{" "}
+            <a
+              href="https://kilo.ai/dashboard"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="underline hover:text-muted"
+            >
+              kilo.ai dashboard
+            </a>
           </p>
         </div>
       ) : (
         <>
           {account.spent_usd != null ? (
             <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
-              <span className="text-zinc-400">{account.period_start ? `Since ${account.period_start}` : "Total used"}</span>
+              <span className="text-muted">{account.period_start ? `Since ${account.period_start}` : "Total used"}</span>
               <span className="text-right font-mono">{fmtUsd(account.spent_usd)}</span>
 
               {account.limit_usd != null && (
                 <>
-                  <span className="text-zinc-400">Credit limit</span>
+                  <span className="text-muted">Credit limit</span>
                   <span className="text-right font-mono">{fmtUsd(account.limit_usd)}</span>
                 </>
               )}
 
               {account.remaining_usd != null && (
                 <>
-                  <span className="text-zinc-400">Remaining</span>
+                  <span className="text-muted">Remaining</span>
                   <span
                     className={`text-right font-mono font-semibold ${
                       account.remaining_usd < 5  ? "text-red-400"     :
@@ -100,12 +120,12 @@ export function AccountBalances() {
   const { data, error, isLoading } = useAccountUsage();
 
   return (
-    <div className="rounded-lg border border-zinc-700 bg-zinc-900/50 p-4 space-y-3">
-      <h2 className="text-sm font-semibold uppercase tracking-wider text-zinc-400">
+    <div className="rounded-lg border border-border bg-card/50 p-4 space-y-3">
+      <h2 className="text-sm font-semibold uppercase tracking-wider text-muted">
         My API Accounts
       </h2>
 
-      {isLoading && <p className="text-sm text-zinc-500">Loading account data…</p>}
+      {isLoading && <p className="text-sm text-muted">Loading account data…</p>}
       {error && <p className="text-sm text-red-400">Failed to load: {error.message}</p>}
       {data && (
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">

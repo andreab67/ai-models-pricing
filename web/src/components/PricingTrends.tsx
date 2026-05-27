@@ -14,6 +14,9 @@ import {
 
 import { fmtUsd, useActivity, useHistory } from "@/lib/api";
 
+const CHART_BLUE = "#3b82f6";
+const CHART_GREEN = "#22c55e";
+
 export function PricingTrends() {
   const { data: activity, isLoading } = useActivity();
   const [selectedModel, setSelectedModel] = useState<string | null>(null);
@@ -42,8 +45,6 @@ export function PricingTrends() {
       output: h.completion_usd_per_mtok,
     })) ?? [];
 
-  const activeId = modelId;
-
   return (
     <section className="card rounded-lg p-4 w-full">
       <h2 className="mb-1 text-lg font-semibold">Pricing Trends</h2>
@@ -55,12 +56,12 @@ export function PricingTrends() {
 
       {items.length > 0 && (
         <>
-          <div className="mb-4 flex flex-wrap gap-2">
+          <div className="mb-4 flex flex-wrap gap-2" role="group" aria-label="Select model">
             {items.map((m) => {
               const label = m.model_id.includes("/")
                 ? m.model_id.split("/")[1]
                 : m.model_id;
-              const active = (activeId === m.model_id);
+              const active = modelId === m.model_id;
               return (
                 <button
                   key={m.model_id}
@@ -69,7 +70,7 @@ export function PricingTrends() {
                   className={`rounded px-3 py-1 text-xs font-medium transition-colors ${
                     active
                       ? "bg-blue-600 text-white"
-                      : "bg-zinc-800 text-zinc-300 hover:bg-zinc-700"
+                      : "bg-border text-fg/80 hover:bg-border/70"
                   }`}
                 >
                   {label}
@@ -103,7 +104,7 @@ export function PricingTrends() {
                     type="monotone"
                     dataKey="input"
                     name="In $/Mtok"
-                    stroke="#3b82f6"
+                    stroke={CHART_BLUE}
                     dot={false}
                     strokeWidth={2}
                   />
@@ -111,7 +112,7 @@ export function PricingTrends() {
                     type="monotone"
                     dataKey="output"
                     name="Out $/Mtok"
-                    stroke="#22c55e"
+                    stroke={CHART_GREEN}
                     dot={false}
                     strokeWidth={2}
                   />

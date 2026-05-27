@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { X } from "lucide-react";
 import {
   Bar,
@@ -22,6 +22,9 @@ const CHANNEL_LABEL: Record<string, string> = {
   kilo_byok: "Kilo BYOK",
 };
 
+const CHART_BLUE = "#3b82f6";
+const CHART_GREEN = "#22c55e";
+
 interface Props {
   modelId: string | null;
   onClose: () => void;
@@ -37,6 +40,9 @@ export function ModelDetailModal({
   kiloStreakMonths,
   kiloAnnual,
 }: Props) {
+  const closeRef = useRef<HTMLButtonElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+
   const { data: comparison, isLoading } = useComparison(
     modelId,
     kiloTier,
@@ -47,11 +53,38 @@ export function ModelDetailModal({
   const { data: activity } = useActivity();
   const myUsage = activity?.items.find((i) => i.model_id === modelId);
 
+  // Focus close button when modal opens; restore focus on close
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    if (!modelId) return;
+    const prev = document.activeElement as HTMLElement | null;
+    closeRef.current?.focus();
+    return () => prev?.focus();
+  }, [modelId]);
+
+  // Escape + focus trap
+  useEffect(() => {
+    if (!modelId) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") { onClose(); return; }
+      if (e.key !== "Tab") return;
+      const dialog = dialogRef.current;
+      if (!dialog) return;
+      const focusable = Array.from(
+        dialog.querySelectorAll<HTMLElement>(
+          'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+        ),
+      ).filter((el) => !el.hasAttribute("disabled"));
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (e.shiftKey) {
+        if (document.activeElement === first) { e.preventDefault(); last?.focus(); }
+      } else {
+        if (document.activeElement === last) { e.preventDefault(); first?.focus(); }
+      }
+    };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  }, [modelId, onClose]);
 
   if (!modelId) return null;
 
@@ -64,26 +97,34 @@ export function ModelDetailModal({
 
   const isFreeModel = chartData.length > 0 && chartData.every((d) => d.input === 0 && d.output === 0);
 
+  const fmtTokens = (n: number | null | undefined) =>
+    n ? n.toLocaleString() : "—";
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
       onClick={onClose}
     >
       <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="modal-title"
         className="card max-h-[90vh] w-full max-w-3xl overflow-auto rounded-lg p-5 shadow-xl"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-3 flex items-start justify-between">
           <div>
-            <h2 className="text-lg font-semibold">
+            <h2 id="modal-title" className="text-lg font-semibold">
               {comparison?.model.name ?? modelId}
             </h2>
             <p className="font-mono text-xs opacity-60">{modelId}</p>
           </div>
           <button
+            ref={closeRef}
             type="button"
             onClick={onClose}
-            className="rounded p-1 hover:bg-black/10 dark:hover:bg-white/10"
+            className="rounded p-1 hover:bg-black/10 dark:hover:bg-white/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent"
             aria-label="Close"
           >
             <X size={18} />
@@ -95,14 +136,8 @@ export function ModelDetailModal({
         {comparison && (
           <>
             <div className="grid grid-cols-2 gap-2 text-sm md:grid-cols-4">
-              <Meta
-                label="Context"
-                value={(comparison.model.context_length ?? 0).toLocaleString()}
-              />
-              <Meta
-                label="Max out"
-                value={(comparison.model.max_completion_tokens ?? 0).toLocaleString()}
-              />
+              <Meta label="Context" value={fmtTokens(comparison.model.context_length)} />
+              <Meta label="Max out" value={fmtTokens(comparison.model.max_completion_tokens)} />
               <Meta label="Tools" value={comparison.model.supports_tools ? "yes" : "no"} />
               <Meta label="Vision" value={comparison.model.supports_vision ? "yes" : "no"} />
             </div>
@@ -136,10 +171,7 @@ export function ModelDetailModal({
                 </thead>
                 <tbody>
                   {comparison.channels.map((c) => (
-                    <tr
-                      key={c.channel}
-                      className="border-b border-border"
-                    >
+                    <tr key={c.channel} className="border-b border-border">
                       <td className="px-2 py-1">{CHANNEL_LABEL[c.channel]}</td>
                       <td className="px-2 py-1 text-right font-mono">
                         {fmtUsd(c.prompt_usd_per_mtok)}
@@ -154,25 +186,27 @@ export function ModelDetailModal({
               </table>
             </div>
 
-            {!isFreeModel && <div className="mt-4 h-64">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={chartData}>
-                  <CartesianGrid stroke="rgb(var(--border))" strokeDasharray="3 3" />
-                  <XAxis dataKey="channel" stroke="rgb(var(--muted))" fontSize={11} />
-                  <YAxis stroke="rgb(var(--muted))" fontSize={11} />
-                  <Tooltip
-                    contentStyle={{
-                      background: "rgb(var(--card))",
-                      border: "1px solid rgb(var(--border))",
-                      color: "rgb(var(--fg))",
-                    }}
-                  />
-                  <Legend />
-                  <Bar dataKey="input" name="In $/Mtok" fill="#3b82f6" />
-                  <Bar dataKey="output" name="Out $/Mtok" fill="#22c55e" />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>}
+            {!isFreeModel && (
+              <div className="mt-4 h-64">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={chartData}>
+                    <CartesianGrid stroke="rgb(var(--border))" strokeDasharray="3 3" />
+                    <XAxis dataKey="channel" stroke="rgb(var(--muted))" fontSize={11} />
+                    <YAxis stroke="rgb(var(--muted))" fontSize={11} />
+                    <Tooltip
+                      contentStyle={{
+                        background: "rgb(var(--card))",
+                        border: "1px solid rgb(var(--border))",
+                        color: "rgb(var(--fg))",
+                      }}
+                    />
+                    <Legend />
+                    <Bar dataKey="input" name="In $/Mtok" fill={CHART_BLUE} />
+                    <Bar dataKey="output" name="Out $/Mtok" fill={CHART_GREEN} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            )}
 
             {history && history.length > 1 && (
               <p className="mt-3 text-xs opacity-60">

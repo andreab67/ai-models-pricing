@@ -9,6 +9,9 @@ import { ThemeToggle } from "@/components/ThemeToggle";
 export const metadata: Metadata = {
   title: "Model Pricing — andrea-house",
   description: "Live OpenRouter token pricing vs. Kilo Code plan math",
+  icons: {
+    icon: "/favicon.svg",
+  },
 };
 
 export default function RootLayout({
