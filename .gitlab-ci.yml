@@ -194,7 +194,12 @@ deploy:prod:
     - kubectl -n model-pricing rollout status deployment/web --timeout=120s
   environment:
     name: production
-    url: https://models.andrea-house.com
+    url: https://your-domain.com  # Update to your deployment domain
   rules:
     - if: '$CI_COMMIT_BRANCH == "main"'
       when: on_success
+
+# NOTE: VSCode extension (vscode/extension/) is included for reference only.
+# Do NOT create GitHub releases of the extension. It is not published to the
+# VSCode Marketplace. Users interested in the extension should build it
+# manually from source: vscode/extension/README.md
