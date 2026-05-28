@@ -1,5 +1,6 @@
 stages:
   - lint
+  - sast
   - build
   - test
 
@@ -13,6 +14,7 @@ variables:
 # See: https://nvd.nist.gov/vuln/detail/CVE-2025-54121
 
 # Lint & typecheck frontend
+
 lint:web:
   stage: lint
   image: node:22-alpine
@@ -24,6 +26,44 @@ lint:web:
   cache:
     paths:
       - web/node_modules/
+  only:
+    - merge_requests
+    - main
+
+# SAST: Trivy scan API Dockerfile
+scan:api-trivy:
+  stage: sast
+  image: aquasec/trivy:latest
+  script:
+    - trivy image --severity HIGH,CRITICAL --exit-code 0 --no-progress --format json --output api-scan.json python:3.14-slim
+    - trivy image --severity HIGH,CRITICAL --exit-code 0 --no-progress --format sarif --output api-scan.sarif python:3.14-slim
+    - echo "✅ API base image (python:3.14-slim) scanned for vulnerabilities"
+  artifacts:
+    reports:
+      sast: api-scan.sarif
+    paths:
+      - api-scan.json
+      - api-scan.sarif
+  allow_failure: true
+  only:
+    - merge_requests
+    - main
+
+# SAST: Trivy scan Web Dockerfile
+scan:web-trivy:
+  stage: sast
+  image: aquasec/trivy:latest
+  script:
+    - trivy image --severity HIGH,CRITICAL --exit-code 0 --no-progress --format json --output web-scan.json node:22-alpine
+    - trivy image --severity HIGH,CRITICAL --exit-code 0 --no-progress --format sarif --output web-scan.sarif node:22-alpine
+    - echo "✅ Web base image (node:22-alpine) scanned for vulnerabilities"
+  artifacts:
+    reports:
+      sast: web-scan.sarif
+    paths:
+      - web-scan.json
+      - web-scan.sarif
+  allow_failure: true
   only:
     - merge_requests
     - main
