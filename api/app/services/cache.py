@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import re
 import time
 from typing import Any
 
@@ -38,8 +37,7 @@ class Cache:
                 self._client = redis.from_url(self._url, decode_responses=True)
                 await self._client.ping()
             except Exception as exc:
-                safe_url = re.sub(r":[^@]+@", ":@", self._url)
-                log.warning("redis_unavailable", url=safe_url, error=str(exc))
+                log.warning("redis_unavailable", url=self._url, error=str(exc))
                 self._client = None
         return self._client
 
