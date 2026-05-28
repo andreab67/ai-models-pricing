@@ -28,7 +28,9 @@ lint:web:
 # SAST: Trivy scan API Dockerfile
 scan:api-trivy:
   stage: sast
-  image: aquasec/trivy:latest
+  image:
+    name: aquasec/trivy:latest
+    entrypoint: [""]
   script:
     - trivy image --severity HIGH,CRITICAL --exit-code 0 --no-progress --format json --output api-scan.json python:3.14-slim
     - trivy image --severity HIGH,CRITICAL --exit-code 0 --no-progress --format sarif --output api-scan.sarif python:3.14-slim
@@ -47,7 +49,9 @@ scan:api-trivy:
 # SAST: Trivy scan Web Dockerfile
 scan:web-trivy:
   stage: sast
-  image: aquasec/trivy:latest
+  image:
+    name: aquasec/trivy:latest
+    entrypoint: [""]
   script:
     - trivy image --severity HIGH,CRITICAL --exit-code 0 --no-progress --format json --output web-scan.json node:22-alpine
     - trivy image --severity HIGH,CRITICAL --exit-code 0 --no-progress --format sarif --output web-scan.sarif node:22-alpine
