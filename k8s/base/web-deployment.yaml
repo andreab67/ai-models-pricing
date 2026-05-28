@@ -18,11 +18,9 @@ spec:
         runAsUser: 1000
         runAsGroup: 1000
         seccompProfile: { type: RuntimeDefault }
-      imagePullSecrets:
-        - name: gitlab-regcred
       containers:
         - name: web
-          image: gitlab.andrea-house.com:5050/root/model-pricing/web:latest
+          image: ghcr.io/andreab67/ai-models-pricing/web:latest
           imagePullPolicy: IfNotPresent
           ports:
             - { containerPort: 3000, name: http }

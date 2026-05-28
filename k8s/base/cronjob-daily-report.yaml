@@ -19,11 +19,9 @@ spec:
       template:
         spec:
           restartPolicy: OnFailure
-          imagePullSecrets:
-            - name: gitlab-regcred
           containers:
             - name: report
-              image: gitlab.andrea-house.com:5050/root/model-pricing/api:latest
+              image: ghcr.io/andreab67/ai-models-pricing/api:latest
               command: ["python", "-m", "app.jobs.daily_report"]
               envFrom:
                 - configMapRef: { name: model-pricing-config }
