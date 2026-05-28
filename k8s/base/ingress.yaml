@@ -8,10 +8,10 @@ metadata:
 spec:
   ingressClassName: traefik
   tls:
-    - hosts: [models.andrea-house.com]
-      secretName: models-andrea-house-tls
+    - hosts: [models.example.com]
+      secretName: models-tls
   rules:
-    - host: models.andrea-house.com
+    - host: models.example.com
       http:
         paths:
           - path: /
