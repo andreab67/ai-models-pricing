@@ -4,7 +4,7 @@ namespace: model-pricing
 resources:
   - ../../base
 images:
-  - name: gitlab.andrea-house.com:5050/root/model-pricing/api
+  - name: ghcr.io/andreab67/ai-models-pricing/api
     newTag: latest
-  - name: gitlab.andrea-house.com:5050/root/model-pricing/web
+  - name: ghcr.io/andreab67/ai-models-pricing/web
     newTag: latest
