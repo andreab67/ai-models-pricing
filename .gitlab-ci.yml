@@ -10,11 +10,6 @@ variables:
   IMAGE_API: ${REGISTRY}/${CI_PROJECT_PATH}/api
   IMAGE_WEB: ${REGISTRY}/${CI_PROJECT_PATH}/web
 
-# Security note: Starlette >=0.49.1 includes fix for CVE-2025-54121 (file rollover blocking)
-# See: https://nvd.nist.gov/vuln/detail/CVE-2025-54121
-
-# Lint & typecheck frontend
-
 lint:web:
   stage: lint
   image: node:22-alpine
