@@ -1,10 +1,21 @@
 # AI Model Pricing Dashboard
 
-**Real-time cost tracking and optimization across 10+ LLM providers in one unified interface.**
+[![Latest Release](https://img.shields.io/badge/release-v1.1-blue)](https://github.com/yourusername/ai-models-pricing/releases/tag/v1.1) [![License: BSD 3-Clause](https://img.shields.io/badge/license-BSD%203--Clause-green)](LICENSE)
+
+**Real-time cost tracking and optimization across 100+ LLM models from 10+ providers in one unified interface.**
 
 A production-grade dashboard for tracking, comparing, and optimizing Large Language Model (LLM) costs across OpenRouter, OpenAI, Anthropic, and Kilo AI Gateway. Built with enterprise-ready infrastructure, this system provides teams with the cost visibility and data-driven insights needed to maximize ROI on AI workloads.
 
 ![Dashboard](docs/dashboard.jpg)
+
+## What's New in v1.1
+
+- ✨ **30-Day Price Trend Charts** — Visualize input and output costs over time per model
+- 🎨 **Redesigned Model Details Modal** — Full pricing comparison, context window, and capability tags
+- 🏆 **Improved Top-N Ranking** — Better filtering for minimum context window (1M+ tokens)
+- 📱 **Enhanced Mobile UI** — Responsive cards and better touch navigation
+- 🔧 **Public Repository** — Full source code, Kubernetes manifests, and deployment guides
+- 📋 **Complete Documentation** — FUNCTIONAL.md (API reference), SBOM.md (dependencies), and architecture guide
 
 ## Why This Matters
 
@@ -16,6 +27,7 @@ Organizations running multi-provider AI workloads lack a unified view of costs a
 - **Fragmented visibility**: Tracking spend across provider dashboards is time-consuming and error-prone
 
 This dashboard solves all of these problems by:
+
 - **Aggregating 100+ models** from competing providers into a single searchable catalog
 - **Auto-updating every 15 minutes** at zero cost (pricing is public data)
 - **Normalizing costs** to USD per 1M tokens for apples-to-apples comparison
@@ -69,6 +81,18 @@ This dashboard solves all of these problems by:
 
 ## Dashboard Screenshots
 
+### Main Dashboard
+
+![Dashboard](docs/dashboard.jpg)
+
+The unified pricing interface showing all 100+ models with real-time rankings, cost metrics, and provider comparison at a glance.
+
+### Model Details & Trends
+
+![Model Details](docs/ModelDetails.jpg)
+
+Drill into any model to see 30-day price history, provider comparisons, context window, and capability tags for detailed cost-benefit analysis.
+
 ### Pricing Trends Visualization
 
 ![Pricing Trends](docs/pricing-trends.jpg)
@@ -76,6 +100,8 @@ This dashboard solves all of these problems by:
 30-day price history for any model, visualized as line chart with input (blue) and output (green) trends. Easily spot pricing changes and market opportunities.
 
 ## Quick Start (Local)
+
+### Full Stack (Recommended)
 
 ```bash
 # 1. Clone and configure
@@ -176,7 +202,7 @@ kubectl apply -f k8s/certificate.yaml
 
 ## Architecture
 
-```
+```text
 Ingress (TLS) → Load Balancer
     ├─ /         → Next.js (web, replicas=2–3)
     └─ /api/*    → FastAPI (api, replicas=2–3)
@@ -291,7 +317,7 @@ See `SBOM.md` for complete dependency inventory and license compliance.
 
 BSD 3-Clause License. See LICENSE file for details.
 
-## Support
+## Support & Services
 
 For questions about deployment, customization, or integration:
 
@@ -300,8 +326,21 @@ For questions about deployment, customization, or integration:
 3. See `docker-compose.yml` for local dev setup
 4. Review `k8s/` for production manifest examples
 
+### Professional Services
+
+**Interested in custom deployment, enterprise integrations, or AI cost optimization consulting?**
+
+📅 **[Schedule a consultation](https://greenyogainc.com/book)** with our team at Green Yoga Inc.
+
+We help organizations:
+
+- Deploy multi-provider AI workloads at scale
+- Optimize LLM costs across Anthropic, OpenAI, and other providers
+- Design observability and monitoring for AI infrastructure
+- Build custom pricing aggregation for proprietary models
+
 ---
 
 **Built for teams running multi-provider AI workloads who need cost visibility, optimization, and data-driven insights.**
 
-Need custom modifications or production deployment guidance? The codebase is designed for extensibility—pricing providers, ranking algorithms, and report formats are all customizable without modifying core infrastructure.
+The codebase is designed for extensibility—pricing providers, ranking algorithms, and report formats are all customizable without modifying core infrastructure. Deploy on your own infrastructure or contact us for managed hosting options.
