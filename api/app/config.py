@@ -65,6 +65,11 @@ class Settings(BaseSettings):
     rank_max_input_price: float = Field(default=10.0)   # USD / Mtok
     rank_max_output_price: float = Field(default=40.0)  # USD / Mtok
     rank_top_n: int = Field(default=10)
+    # Model ID substrings that disqualify a model from the coding ranking.
+    # Targets lightweight/throughput-optimised variants not suited for coding.
+    rank_exclude_patterns: list[str] = Field(
+        default=["flash-lite", "flash-8b", "learnlm"]
+    )
 
     # --- external account keys -------------------------------------------
     openrouter_api_key: str = Field(default="")

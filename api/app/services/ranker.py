@@ -28,6 +28,9 @@ def _eligible(model: ModelPricing) -> bool:
         return False
     if (model.context_length or 0) < _settings.rank_min_context_tokens:
         return False
+    model_id_lower = model.id.lower()
+    if any(p in model_id_lower for p in _settings.rank_exclude_patterns):
+        return False
     return True
 
 
