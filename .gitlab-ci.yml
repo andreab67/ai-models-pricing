@@ -3,6 +3,7 @@ stages:
   - sast
   - build
   - test
+  - deploy
 
 variables:
   DOCKER_DRIVER: overlay2
@@ -122,4 +123,21 @@ test:db-migrations:
     - echo "✅ Database schema migrations validated"
   only:
     - merge_requests
+    - main
+
+# Deploy to home Kubernetes cluster (main only)
+deploy:k8s:
+  stage: deploy
+  image:
+    name: bitnami/kubectl:latest
+    entrypoint: [""]
+  needs: [build:api, build:web]
+  script:
+    - echo "${KUBE_CONFIG}" | base64 -d > /tmp/kubeconfig
+    - export KUBECONFIG=/tmp/kubeconfig
+    - kubectl set image deployment/api api=${IMAGE_API}:${CI_COMMIT_SHORT_SHA} -n model-pricing
+    - kubectl set image deployment/web web=${IMAGE_WEB}:${CI_COMMIT_SHORT_SHA} -n model-pricing
+    - kubectl rollout status deployment/api -n model-pricing --timeout=120s
+    - kubectl rollout status deployment/web -n model-pricing --timeout=120s
+  only:
     - main
