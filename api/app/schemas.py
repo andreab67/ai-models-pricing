@@ -70,7 +70,7 @@ class KiloProjection(BaseModel):
 
 
 class AccountProviderUsage(BaseModel):
-    provider: Literal["openai", "anthropic", "openrouter", "kilo"]
+    provider: Literal["openrouter", "kilo"]
     configured: bool = False
     plan: str | None = None
     limit_usd: float | None = None
@@ -84,8 +84,6 @@ class AccountProviderUsage(BaseModel):
 class AccountsUsage(BaseModel):
     openrouter: AccountProviderUsage
     kilo: AccountProviderUsage
-    openai: AccountProviderUsage
-    anthropic: AccountProviderUsage
     fetched_at: datetime
 
 

@@ -1,17 +1,17 @@
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: models
+  name: sr-models
   annotations:
     traefik.ingress.kubernetes.io/router.entrypoints: websecure
     traefik.ingress.kubernetes.io/router.tls: "true"
 spec:
   ingressClassName: traefik
   tls:
-    - hosts: [models.example.com]
+    - hosts: [models.cloudreviewer.net]
       secretName: models-tls
   rules:
-    - host: models.example.com
+    - host: models.cloudreviewer.net
       http:
         paths:
           - path: /

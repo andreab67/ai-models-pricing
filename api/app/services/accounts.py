@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 
 import httpx
 
@@ -110,182 +110,8 @@ async def _check_kilo() -> AccountProviderUsage:
             )
 
 
-async def _check_openai() -> AccountProviderUsage:
-    admin_key = _settings.openai_admin_key
-    regular_key = _settings.openai_api_key
-    if not admin_key and not regular_key:
-        return AccountProviderUsage(provider="openai", configured=False)
-
-    async with httpx.AsyncClient(timeout=10.0) as client:
-        if admin_key:
-            # Use the cost report as both validation and data source
-            try:
-                start_time = int((datetime.now(UTC) - timedelta(days=30)).timestamp())
-                period_start = (datetime.now(UTC) - timedelta(days=30)).strftime("%b %d")
-                resp = await client.get(
-                    "https://api.openai.com/v1/organization/costs",
-                    headers={"Authorization": f"Bearer {admin_key}"},
-                    params={"start_time": start_time, "limit": 30, "bucket_width": "1d"},
-                )
-                if resp.status_code == 401:
-                    return AccountProviderUsage(
-                        provider="openai", configured=True, error="Admin key invalid"
-                    )
-                resp.raise_for_status()
-                buckets = resp.json().get("data", [])
-                total = sum(
-                    float(r.get("amount", {}).get("value", 0))
-                    for b in buckets
-                    for r in b.get("results", [])
-                )
-                return AccountProviderUsage(
-                    provider="openai",
-                    configured=True,
-                    spent_usd=round(total, 4),
-                    period_start=period_start,
-                )
-            except Exception as exc:
-                log.warning("openai_costs_failed", error=str(exc))
-                return AccountProviderUsage(
-                    provider="openai", configured=True, error=str(exc)[:80]
-                )
-        else:
-            # Regular key only — just validate
-            try:
-                resp = await client.get(
-                    "https://api.openai.com/v1/models",
-                    headers={"Authorization": f"Bearer {regular_key}"},
-                )
-                if resp.status_code == 401:
-                    return AccountProviderUsage(
-                        provider="openai", configured=True, error="API key invalid"
-                    )
-                resp.raise_for_status()
-                return AccountProviderUsage(provider="openai", configured=True)
-            except Exception as exc:
-                log.warning("openai_check_failed", error=str(exc))
-                return AccountProviderUsage(
-                    provider="openai", configured=True, error=str(exc)[:80]
-                )
-
-
-async def _check_anthropic() -> AccountProviderUsage:
-    admin_key = _settings.anthropic_admin_key
-    regular_key = _settings.anthropic_api_key
-    if not admin_key and not regular_key:
-        return AccountProviderUsage(provider="anthropic", configured=False)
-
-    async with httpx.AsyncClient(timeout=10.0) as client:
-        if not admin_key:
-            # Regular key only — just validate
-            try:
-                resp = await client.get(
-                    "https://api.anthropic.com/v1/models",
-                    headers={"x-api-key": regular_key, "anthropic-version": "2023-06-01"},
-                )
-                if resp.status_code == 401:
-                    return AccountProviderUsage(
-                        provider="anthropic", configured=True, error="API key invalid"
-                    )
-                resp.raise_for_status()
-                return AccountProviderUsage(provider="anthropic", configured=True)
-            except Exception as exc:
-                log.warning("anthropic_check_failed", error=str(exc))
-                return AccountProviderUsage(
-                    provider="anthropic", configured=True, error=str(exc)[:80]
-                )
-
-        # Fetch 30-day cost report with admin key
-        try:
-            now = datetime.now(UTC)
-            starting_at = (now - timedelta(days=30)).strftime("%Y-%m-%dT%H:%M:%SZ")
-            ending_at = now.strftime("%Y-%m-%dT%H:%M:%SZ")
-            period_start = (now - timedelta(days=30)).strftime("%b %d")
-            resp = await client.get(
-                "https://api.anthropic.com/v1/organizations/cost_report",
-                headers={"x-api-key": admin_key, "anthropic-version": "2023-06-01"},
-                params={"starting_at": starting_at, "ending_at": ending_at, "bucket_width": "1d"},
-            )
-            resp.raise_for_status()
-            buckets = resp.json().get("data", [])
-            total = sum(
-                float(c.get("amount", {}).get("value", 0))
-                for b in buckets
-                for c in b.get("costs", [])
-            )
-            return AccountProviderUsage(
-                provider="anthropic",
-                configured=True,
-                spent_usd=round(total, 4),
-                period_start=period_start,
-            )
-        except Exception as exc:
-            log.warning("anthropic_costs_failed", error=str(exc))
-            return AccountProviderUsage(provider="anthropic", configured=True, error=str(exc)[:80])
-
-
 _ACTIVITY_CACHE_KEY = "accounts:activity"
 _ACTIVITY_CACHE_TTL = 900  # 15 min
-
-
-async def get_openai_activity() -> ActivityResponse:
-    """Fetch OpenAI costs by model from the cost report API (last 30 days)."""
-    cache_key = "accounts:openai_activity"
-    cache_ttl = 900  # 15 min
-
-    cached = await cache.get(cache_key)
-    if cached:
-        return ActivityResponse.model_validate(cached)
-
-    admin_key = _settings.openai_admin_key
-    if not admin_key:
-        return ActivityResponse(items=[], fetched_at=datetime.now(UTC))
-
-    async with httpx.AsyncClient(timeout=15.0) as client:
-        try:
-            start_time = int((datetime.now(UTC) - timedelta(days=30)).timestamp())
-            resp = await client.get(
-                "https://api.openai.com/v1/organization/costs",
-                headers={"Authorization": f"Bearer {admin_key}"},
-                params={"start_time": start_time, "limit": 100, "bucket_width": "1d"},
-            )
-            resp.raise_for_status()
-            buckets = resp.json().get("data", [])
-
-            # Aggregate by model from cost results
-            agg: dict[str, ModelActivityItem] = {}
-            for bucket in buckets:
-                for result in bucket.get("results", []):
-                    model_id = result.get("line_item_json", {}).get("model", "unknown")
-                    if not model_id:
-                        continue
-                    cost = float(result.get("amount", {}).get("value", 0))
-                    if model_id in agg:
-                        existing = agg[model_id]
-                        agg[model_id] = ModelActivityItem(
-                            model_id=model_id,
-                            requests=existing.requests,  # OpenAI API doesn't provide request count
-                            prompt_tokens=existing.prompt_tokens,
-                            completion_tokens=existing.completion_tokens,
-                            cost_usd=round(existing.cost_usd + cost, 4),
-                        )
-                    else:
-                        agg[model_id] = ModelActivityItem(
-                            model_id=model_id,
-                            requests=0,
-                            prompt_tokens=0,
-                            completion_tokens=0,
-                            cost_usd=round(cost, 4),
-                        )
-
-            items = sorted(agg.values(), key=lambda x: x.cost_usd, reverse=True)
-            result = ActivityResponse(items=items, fetched_at=datetime.now(UTC))
-        except Exception as exc:
-            log.warning("openai_activity_failed", error=str(exc))
-            result = ActivityResponse(items=[], fetched_at=datetime.now(UTC))
-
-    await cache.set(cache_key, result.model_dump(mode="json"), ttl=cache_ttl)
-    return result
 
 
 async def get_activity() -> ActivityResponse:
@@ -352,17 +178,13 @@ async def get_usage() -> AccountsUsage:
     if cached:
         return AccountsUsage.model_validate(cached)
 
-    openrouter, kilo, openai, anthropic = await asyncio.gather(
+    openrouter, kilo = await asyncio.gather(
         _check_openrouter(),
         _check_kilo(),
-        _check_openai(),
-        _check_anthropic(),
     )
     result = AccountsUsage(
         openrouter=openrouter,
         kilo=kilo,
-        openai=openai,
-        anthropic=anthropic,
         fetched_at=datetime.now(UTC),
     )
     await cache.set(_CACHE_KEY, result.model_dump(mode="json"), ttl=_CACHE_TTL)

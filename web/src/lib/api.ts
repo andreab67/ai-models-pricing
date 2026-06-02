@@ -110,7 +110,7 @@ export function useHistory(modelId: string | null, days: number = 30) {
 }
 
 export interface AccountProviderUsage {
-  provider: "openai" | "anthropic" | "openrouter" | "kilo";
+  provider: "openrouter" | "kilo";
   configured: boolean;
   plan: string | null;
   limit_usd: number | null;
@@ -124,8 +124,6 @@ export interface AccountProviderUsage {
 export interface AccountsUsage {
   openrouter: AccountProviderUsage;
   kilo: AccountProviderUsage;
-  openai: AccountProviderUsage;
-  anthropic: AccountProviderUsage;
   fetched_at: string;
 }
 
@@ -158,13 +156,6 @@ export function useKiloModels() {
 
 export function useActivity() {
   return useSWR<ActivityResponse>("/api/accounts/activity", fetcher, {
-    ...defaultConfig,
-    refreshInterval: 900_000, // 15 min
-  });
-}
-
-export function useOpenAIActivity() {
-  return useSWR<ActivityResponse>("/api/accounts/openai-activity", fetcher, {
     ...defaultConfig,
     refreshInterval: 900_000, // 15 min
   });

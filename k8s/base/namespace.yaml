@@ -1,7 +1,7 @@
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: model-pricing
+  name: sr-models
   labels:
-    name: model-pricing
+    name: sr-models
     linkerd.io/inject: enabled

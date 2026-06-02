@@ -17,11 +17,11 @@ spec:
           restartPolicy: OnFailure
           containers:
             - name: diff
-              image: ghcr.io/andreab67/ai-models-pricing/api:latest
+              image: gitlab.cloudreviewer.net:5050/andreab/sr-models/api:latest
               command: ["python", "-m", "app.jobs.kilo_diff"]
               envFrom:
-                - configMapRef: { name: model-pricing-config }
-                - secretRef:    { name: model-pricing-secrets }
+                - configMapRef: { name: sr-models-config }
+                - secretRef:    { name: sr-models-secrets }
                 - secretRef:    { name: ses-creds }
               resources:
                 requests: { cpu: 50m,  memory: 128Mi }

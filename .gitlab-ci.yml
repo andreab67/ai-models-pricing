@@ -3,13 +3,12 @@ stages:
   - sast
   - build
   - test
-  - deploy
 
 variables:
-  DOCKER_DRIVER: overlay2
-  REGISTRY: ${CI_REGISTRY}
-  IMAGE_API: ${REGISTRY}/${CI_PROJECT_PATH}/api
-  IMAGE_WEB: ${REGISTRY}/${CI_PROJECT_PATH}/web
+  HARBOR_REGISTRY: "harbor.cloudreviewer.net"
+  HARBOR_PROJECT: "sr"
+  IMAGE_API: "${HARBOR_REGISTRY}/${HARBOR_PROJECT}/sr-models-api"
+  IMAGE_WEB: "${HARBOR_REGISTRY}/${HARBOR_PROJECT}/sr-models-web"
 
 lint:web:
   stage: lint
@@ -26,7 +25,6 @@ lint:web:
     - merge_requests
     - main
 
-# SAST: Trivy scan API Dockerfile
 scan:api-trivy:
   stage: sast
   image:
@@ -35,7 +33,7 @@ scan:api-trivy:
   script:
     - trivy image --severity HIGH,CRITICAL --exit-code 0 --no-progress --format json --output api-scan.json python:3.14-slim
     - trivy image --severity HIGH,CRITICAL --exit-code 0 --no-progress --format sarif --output api-scan.sarif python:3.14-slim
-    - echo "✅ API base image (python:3.14-slim) scanned for vulnerabilities"
+    - echo "API base image scanned"
   artifacts:
     reports:
       sast: api-scan.sarif
@@ -47,7 +45,6 @@ scan:api-trivy:
     - merge_requests
     - main
 
-# SAST: Trivy scan Web Dockerfile
 scan:web-trivy:
   stage: sast
   image:
@@ -56,7 +53,7 @@ scan:web-trivy:
   script:
     - trivy image --severity HIGH,CRITICAL --exit-code 0 --no-progress --format json --output web-scan.json node:22-alpine
     - trivy image --severity HIGH,CRITICAL --exit-code 0 --no-progress --format sarif --output web-scan.sarif node:22-alpine
-    - echo "✅ Web base image (node:22-alpine) scanned for vulnerabilities"
+    - echo "Web base image scanned"
   artifacts:
     reports:
       sast: web-scan.sarif
@@ -68,76 +65,71 @@ scan:web-trivy:
     - merge_requests
     - main
 
-# Build and push API image
 build:api:
   stage: build
-  image: docker:24-dind
-  services:
-    - docker:24-dind
+  timeout: 1h
+  image:
+    name: gcr.io/kaniko-project/executor:debug
+    entrypoint: [""]
   before_script:
-    - mkdir -p /etc/docker/certs.d/${CI_REGISTRY}
-    - echo "${REGISTRY_CA_CERT}" > /etc/docker/certs.d/${CI_REGISTRY}/ca.crt
-  script:
-    - docker build -t ${IMAGE_API}:${CI_COMMIT_SHORT_SHA} -t ${IMAGE_API}:latest api/
     - |
-      if [ "$CI_COMMIT_BRANCH" = "main" ]; then
-        docker login -u ${CI_REGISTRY_USER} -p ${CI_REGISTRY_PASSWORD} ${CI_REGISTRY}
-        docker push ${IMAGE_API}:${CI_COMMIT_SHORT_SHA}
-        docker push ${IMAGE_API}:latest
-      fi
+      mkdir -p /kaniko/.docker
+      AUTH="$(printf '%s:%s' "$HARBOR_USERNAME" "$HARBOR_PASSWORD" | base64 | tr -d '\n')"
+      printf '{"auths":{"%s":{"auth":"%s"}}}' "$HARBOR_REGISTRY" "$AUTH" \
+        > /kaniko/.docker/config.json
+  script:
+    - |
+      TAG="${CI_COMMIT_TAG:-${CI_COMMIT_SHORT_SHA}}"
+      echo "Building ${IMAGE_API}:${TAG}"
+      /kaniko/executor \
+        --context "dir://${CI_PROJECT_DIR}/api" \
+        --dockerfile "${CI_PROJECT_DIR}/api/Dockerfile" \
+        --destination "${IMAGE_API}:${TAG}" \
+        --destination "${IMAGE_API}:latest" \
+        --snapshot-mode=redo \
+        --push-retry=3
   only:
     - merge_requests
     - main
+  when: manual
 
-# Build and push Web image
 build:web:
   stage: build
-  image: docker:24-dind
-  services:
-    - docker:24-dind
+  timeout: 1h
+  image:
+    name: gcr.io/kaniko-project/executor:debug
+    entrypoint: [""]
   before_script:
-    - mkdir -p /etc/docker/certs.d/${CI_REGISTRY}
-    - echo "${REGISTRY_CA_CERT}" > /etc/docker/certs.d/${CI_REGISTRY}/ca.crt
-  script:
-    - docker build -t ${IMAGE_WEB}:${CI_COMMIT_SHORT_SHA} -t ${IMAGE_WEB}:latest web/
     - |
-      if [ "$CI_COMMIT_BRANCH" = "main" ]; then
-        docker login -u ${CI_REGISTRY_USER} -p ${CI_REGISTRY_PASSWORD} ${CI_REGISTRY}
-        docker push ${IMAGE_WEB}:${CI_COMMIT_SHORT_SHA}
-        docker push ${IMAGE_WEB}:latest
-      fi
+      mkdir -p /kaniko/.docker
+      AUTH="$(printf '%s:%s' "$HARBOR_USERNAME" "$HARBOR_PASSWORD" | base64 | tr -d '\n')"
+      printf '{"auths":{"%s":{"auth":"%s"}}}' "$HARBOR_REGISTRY" "$AUTH" \
+        > /kaniko/.docker/config.json
+  script:
+    - |
+      TAG="${CI_COMMIT_TAG:-${CI_COMMIT_SHORT_SHA}}"
+      echo "Building ${IMAGE_WEB}:${TAG}"
+      /kaniko/executor \
+        --context "dir://${CI_PROJECT_DIR}/web" \
+        --dockerfile "${CI_PROJECT_DIR}/web/Dockerfile" \
+        --destination "${IMAGE_WEB}:${TAG}" \
+        --destination "${IMAGE_WEB}:latest" \
+        --snapshot-mode=redo \
+        --push-retry=3
   only:
     - merge_requests
     - main
+  when: manual
 
-# Test database schema with alembic (validates FastAPI + Starlette compatibility)
 test:db-migrations:
   stage: test
   image: python:3.14-slim
   script:
     - cd api
     - pip install --no-cache-dir -e ".[dev]"
-    # Verify Starlette is properly installed (respects pyproject.toml constraints)
     - python -c "import starlette; print(f'Starlette {starlette.__version__} installed')"
     - alembic upgrade head --sql
-    - echo "✅ Database schema migrations validated"
+    - echo "Database schema migrations validated"
   only:
     - merge_requests
-    - main
-
-# Deploy to home Kubernetes cluster (main only)
-deploy:k8s:
-  stage: deploy
-  image:
-    name: bitnami/kubectl:latest
-    entrypoint: [""]
-  needs: [build:api, build:web]
-  script:
-    - echo "${KUBE_CONFIG}" | base64 -d > /tmp/kubeconfig
-    - export KUBECONFIG=/tmp/kubeconfig
-    - kubectl set image deployment/api api=${IMAGE_API}:${CI_COMMIT_SHORT_SHA} -n model-pricing
-    - kubectl set image deployment/web web=${IMAGE_WEB}:${CI_COMMIT_SHORT_SHA} -n model-pricing
-    - kubectl rollout status deployment/api -n model-pricing --timeout=120s
-    - kubectl rollout status deployment/web -n model-pricing --timeout=120s
-  only:
     - main

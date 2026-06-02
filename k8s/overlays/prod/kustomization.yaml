@@ -1,10 +1,10 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
-namespace: model-pricing
+namespace: sr-models
 resources:
   - ../../base
 images:
-  - name: ghcr.io/andreab67/ai-models-pricing/api
+  - name: gitlab.cloudreviewer.net:5050/andreab/sr-models/api
     newTag: latest
-  - name: ghcr.io/andreab67/ai-models-pricing/web
+  - name: gitlab.cloudreviewer.net:5050/andreab/sr-models/web
     newTag: latest

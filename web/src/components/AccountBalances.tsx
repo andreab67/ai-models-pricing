@@ -1,15 +1,13 @@
 "use client";
 
-import { useAccountUsage, useOpenAIActivity, fmtUsd, type AccountProviderUsage, type ModelActivityItem } from "@/lib/api";
+import { useAccountUsage, fmtUsd, type AccountProviderUsage } from "@/lib/api";
 
 const PROVIDER_META: Record<string, { name: string; color: string }> = {
   openrouter: { name: "OpenRouter", color: "text-violet-400" },
   kilo:       { name: "Kilo Code",  color: "text-blue-400"   },
-  openai:     { name: "OpenAI",     color: "text-green-400"  },
-  anthropic:  { name: "Anthropic",  color: "text-orange-400" },
 };
 
-function ProviderCard({ account, openaiActivity }: { account: AccountProviderUsage; openaiActivity?: ModelActivityItem[] }) {
+function ProviderCard({ account }: { account: AccountProviderUsage }) {
   const meta = PROVIDER_META[account.provider];
   const isKilo = account.provider === "kilo";
 
@@ -110,23 +108,6 @@ function ProviderCard({ account, openaiActivity }: { account: AccountProviderUsa
           {usedPct != null && (
             <p className={`text-xs text-right ${usedColor}`}>{usedPct.toFixed(1)}% used</p>
           )}
-
-          {account.provider === "openai" && openaiActivity && openaiActivity.length > 0 && (
-            <div className="border-t border-border pt-2 mt-2">
-              <p className="text-xs text-muted mb-1.5 font-semibold">By model (30d):</p>
-              <div className="space-y-1">
-                {openaiActivity.slice(0, 5).map((item) => (
-                  <div key={item.model_id} className="flex justify-between text-xs">
-                    <span className="text-fg/70 truncate">{item.model_id}</span>
-                    <span className="text-right font-mono">{fmtUsd(item.cost_usd)}</span>
-                  </div>
-                ))}
-                {openaiActivity.length > 5 && (
-                  <p className="text-xs text-muted/50 pt-1">+{openaiActivity.length - 5} more</p>
-                )}
-              </div>
-            </div>
-          )}
         </>
       )}
     </div>
@@ -135,7 +116,6 @@ function ProviderCard({ account, openaiActivity }: { account: AccountProviderUsa
 
 export function AccountBalances() {
   const { data, error, isLoading } = useAccountUsage();
-  const { data: openaiActivityData } = useOpenAIActivity();
 
   return (
     <div className="rounded-lg border border-border bg-card/50 p-4 space-y-3">
@@ -146,11 +126,9 @@ export function AccountBalances() {
       {isLoading && <p className="text-sm text-muted">Loading account data…</p>}
       {error && <p className="text-sm text-red-400">Failed to load: {error.message}</p>}
       {data && (
-        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <div className="grid grid-cols-2 gap-3">
           <ProviderCard account={data.openrouter} />
           <ProviderCard account={data.kilo} />
-          <ProviderCard account={data.openai} openaiActivity={openaiActivityData?.items} />
-          <ProviderCard account={data.anthropic} />
         </div>
       )}
     </div>

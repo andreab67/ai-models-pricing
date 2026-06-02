@@ -72,10 +72,6 @@ class Settings(BaseSettings):
     # --- external account keys -------------------------------------------
     openrouter_api_key: str = Field(default="")
     kilo_api_key: str = Field(default="")
-    openai_api_key: str = Field(default="")
-    openai_admin_key: str = Field(default="")
-    anthropic_api_key: str = Field(default="")
-    anthropic_admin_key: str = Field(default="")
 
     # --- kilo plan (used for account widget) -----------------------------
     kilo_tier: str = Field(default="starter")

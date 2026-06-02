@@ -24,11 +24,11 @@ spec:
         seccompProfile: { type: RuntimeDefault }
       initContainers:
         - name: migrate
-          image: ghcr.io/andreab67/ai-models-pricing/api:latest
+          image: gitlab.cloudreviewer.net:5050/andreab/sr-models/api:latest
           command: ["alembic", "upgrade", "head"]
           envFrom:
-            - configMapRef: { name: model-pricing-config }
-            - secretRef:    { name: model-pricing-secrets }
+            - configMapRef: { name: sr-models-config }
+            - secretRef:    { name: sr-models-secrets }
             - secretRef:    { name: ses-creds }
           securityContext:
             allowPrivilegeEscalation: false
@@ -36,13 +36,13 @@ spec:
             capabilities: { drop: ["ALL"] }
       containers:
         - name: api
-          image: ghcr.io/andreab67/ai-models-pricing/api:latest
+          image: gitlab.cloudreviewer.net:5050/andreab/sr-models/api:latest
           imagePullPolicy: Always
           ports:
             - { containerPort: 8000, name: http }
           envFrom:
-            - configMapRef: { name: model-pricing-config }
-            - secretRef:    { name: model-pricing-secrets }
+            - configMapRef: { name: sr-models-config }
+            - secretRef:    { name: sr-models-secrets }
             - secretRef:    { name: ses-creds }
           resources:
             requests: { cpu: 100m, memory: 192Mi }
