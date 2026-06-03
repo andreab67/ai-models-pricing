@@ -139,6 +139,7 @@ export function ModelTable({ onSelect }: Props) {
                     sort={sort}
                     asc={asc}
                     toggle={toggleSort}
+                    center
                   />
                   <th className="px-2 py-1 text-center">Tools</th>
                 </tr>
@@ -230,6 +231,7 @@ function Th({
   asc,
   toggle,
   numeric = false,
+  center = false,
 }: {
   label: string;
   k: SortKey;
@@ -237,11 +239,13 @@ function Th({
   asc: boolean;
   toggle: (k: SortKey) => void;
   numeric?: boolean;
+  center?: boolean;
 }) {
   const active = sort === k;
+  const align = numeric ? "text-right" : center ? "text-center" : "";
   return (
     <th
-      className={`cursor-pointer px-2 py-1 ${numeric ? "text-right" : ""}`}
+      className={`cursor-pointer px-2 py-1 ${align}`}
       onClick={() => toggle(k)}
     >
       <span className={active ? "font-semibold" : "opacity-70"}>
