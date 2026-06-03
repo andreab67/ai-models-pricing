@@ -8,7 +8,9 @@ type SortKey =
   | "name"
   | "prompt_usd_per_mtok"
   | "completion_usd_per_mtok"
-  | "context_length";
+  | "context_length"
+  | "max_completion_tokens"
+  | "supports_vision";
 
 interface Props {
   onSelect: (id: string) => void;
@@ -123,13 +125,28 @@ export function ModelTable({ onSelect }: Props) {
                     toggle={toggleSort}
                     numeric
                   />
+                  <Th
+                    label="Max Out"
+                    k="max_completion_tokens"
+                    sort={sort}
+                    asc={asc}
+                    toggle={toggleSort}
+                    numeric
+                  />
+                  <Th
+                    label="Vision"
+                    k="supports_vision"
+                    sort={sort}
+                    asc={asc}
+                    toggle={toggleSort}
+                  />
                   <th className="px-2 py-1 text-right">Tools</th>
                 </tr>
               </thead>
               <tbody>
                 {visibleRows.length === 0 ? (
                   <tr>
-                    <td colSpan={5} className="px-2 py-6 text-center text-sm text-muted">
+                    <td colSpan={7} className="px-2 py-6 text-center text-sm text-muted">
                       No models match &ldquo;{query}&rdquo;
                     </td>
                   </tr>
@@ -154,6 +171,14 @@ export function ModelTable({ onSelect }: Props) {
                       </td>
                       <td className="px-2 py-1 text-right font-mono">
                         {m.context_length ? m.context_length.toLocaleString() : "—"}
+                      </td>
+                      <td className="px-2 py-1 text-right font-mono">
+                        {m.max_completion_tokens ? m.max_completion_tokens.toLocaleString() : "—"}
+                      </td>
+                      <td className="px-2 py-1 text-center">
+                        <span aria-label={m.supports_vision ? "Vision supported" : "No vision"}>
+                          {m.supports_vision ? "✓" : "—"}
+                        </span>
                       </td>
                       <td className="px-2 py-1 text-right">
                         <span aria-label={m.supports_tools ? "Supported" : "Not supported"}>
