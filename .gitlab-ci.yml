@@ -91,7 +91,6 @@ build:api:
   only:
     - merge_requests
     - main
-  when: manual
 
 build:web:
   stage: build
@@ -119,7 +118,6 @@ build:web:
   only:
     - merge_requests
     - main
-  when: manual
 
 test:db-migrations:
   stage: test
