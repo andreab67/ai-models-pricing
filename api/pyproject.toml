@@ -1,6 +1,6 @@
 [project]
 name = "model-pricing-api"
-version = "0.1.0"
+version = "1.4.0"
 description = "Token pricing optimizer: OpenRouter vs Kilo Code"
 requires-python = ">=3.12"
 dependencies = [
