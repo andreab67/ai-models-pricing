@@ -24,7 +24,7 @@ spec:
         seccompProfile: { type: RuntimeDefault }
       initContainers:
         - name: migrate
-          image: gitlab.cloudreviewer.net:5050/andreab/sr-models/api:latest
+          image: harbor.cloudreviewer.net/sr/sr-models-api:latest
           command: ["alembic", "upgrade", "head"]
           envFrom:
             - configMapRef: { name: sr-models-config }
@@ -36,7 +36,7 @@ spec:
             capabilities: { drop: ["ALL"] }
       containers:
         - name: api
-          image: gitlab.cloudreviewer.net:5050/andreab/sr-models/api:latest
+          image: harbor.cloudreviewer.net/sr/sr-models-api:latest
           imagePullPolicy: Always
           ports:
             - { containerPort: 8000, name: http }
