@@ -4,7 +4,7 @@ namespace: sr-models
 resources:
   - ../../base
 images:
-  - name: gitlab.cloudreviewer.net:5050/andreab/sr-models/api
+  - name: gitlab.andrea-house.com:5050/root/model-pricing/api
     newTag: latest
-  - name: gitlab.cloudreviewer.net:5050/andreab/sr-models/web
+  - name: gitlab.andrea-house.com:5050/root/model-pricing/web
     newTag: latest

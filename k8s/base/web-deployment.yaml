@@ -20,7 +20,7 @@ spec:
         seccompProfile: { type: RuntimeDefault }
       containers:
         - name: web
-          image: gitlab.cloudreviewer.net:5050/andreab/sr-models/web:latest
+          image: gitlab.andrea-house.com:5050/root/model-pricing/web:latest
           imagePullPolicy: IfNotPresent
           ports:
             - { containerPort: 3000, name: http }
