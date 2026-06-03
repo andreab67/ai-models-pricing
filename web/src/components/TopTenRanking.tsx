@@ -30,7 +30,7 @@ export function TopTenRanking({ onSelect }: Props) {
             <thead>
               <tr className="border-b border-border text-xs text-muted">
                 <th className="pb-2 text-left w-8">#</th>
-                <th className="pb-2 text-left">Model</th>
+                <th className="pb-2 text-left pr-4">Model</th>
                 <th className="pb-2 text-right pr-4">Context</th>
                 <th className="pb-2 text-right pr-4">In $/Mtok</th>
                 <th className="pb-2 text-right pr-4">Out $/Mtok</th>
