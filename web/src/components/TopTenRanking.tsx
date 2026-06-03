@@ -36,7 +36,7 @@ export function TopTenRanking({ onSelect }: Props) {
                 <th className="pb-2 text-right pr-4">Out $/Mtok</th>
                 <th className="pb-2 text-right pr-4">Max Out</th>
                 <th className="pb-2 text-center pr-4">Vision</th>
-                <th className="pb-2 text-center">Tools</th>
+                <th className="pb-2 text-center pr-4">Tools</th>
                 <th className="pb-2 text-right">Blended</th>
               </tr>
             </thead>
@@ -68,7 +68,7 @@ export function TopTenRanking({ onSelect }: Props) {
                       {r.model.supports_vision ? "✓" : "—"}
                     </span>
                   </td>
-                  <td className="py-2 text-center">
+                  <td className="py-2 text-center pr-4">
                     <span aria-label={r.model.supports_tools ? "Supported" : "Not supported"}>
                       {r.model.supports_tools ? "✓" : "—"}
                     </span>
