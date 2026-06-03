@@ -140,7 +140,7 @@ export function ModelTable({ onSelect }: Props) {
                     asc={asc}
                     toggle={toggleSort}
                   />
-                  <th className="px-2 py-1 text-right">Tools</th>
+                  <th className="px-2 py-1 text-center">Tools</th>
                 </tr>
               </thead>
               <tbody>
@@ -180,7 +180,7 @@ export function ModelTable({ onSelect }: Props) {
                           {m.supports_vision ? "✓" : "—"}
                         </span>
                       </td>
-                      <td className="px-2 py-1 text-right">
+                      <td className="px-2 py-1 text-center">
                         <span aria-label={m.supports_tools ? "Supported" : "Not supported"}>
                           {m.supports_tools ? "✓" : "—"}
                         </span>
