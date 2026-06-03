@@ -34,6 +34,9 @@ export function TopTenRanking({ onSelect }: Props) {
                 <th className="pb-2 text-right pr-4">Context</th>
                 <th className="pb-2 text-right pr-4">In $/Mtok</th>
                 <th className="pb-2 text-right pr-4">Out $/Mtok</th>
+                <th className="pb-2 text-right pr-4">Max Out</th>
+                <th className="pb-2 text-center pr-4">Vision</th>
+                <th className="pb-2 text-center">Tools</th>
                 <th className="pb-2 text-right">Blended</th>
               </tr>
             </thead>
@@ -56,6 +59,19 @@ export function TopTenRanking({ onSelect }: Props) {
                   </td>
                   <td className="py-2 text-right pr-4 font-mono text-xs opacity-70">
                     {fmtUsd(r.model.completion_usd_per_mtok)}
+                  </td>
+                  <td className="py-2 text-right pr-4 font-mono text-xs opacity-70">
+                    {r.model.max_completion_tokens ? fmtCtx(r.model.max_completion_tokens) : "—"}
+                  </td>
+                  <td className="py-2 text-center pr-4">
+                    <span aria-label={r.model.supports_vision ? "Vision supported" : "No vision"}>
+                      {r.model.supports_vision ? "✓" : "—"}
+                    </span>
+                  </td>
+                  <td className="py-2 text-center">
+                    <span aria-label={r.model.supports_tools ? "Supported" : "Not supported"}>
+                      {r.model.supports_tools ? "✓" : "—"}
+                    </span>
                   </td>
                   <td className="py-2 text-right font-mono text-xs font-semibold">
                     {fmtUsd(r.blended_usd_per_mtok)}
