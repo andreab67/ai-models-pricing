@@ -133,13 +133,66 @@ test:db-migrations:
     - merge_requests
     - main
 
+# Apply Alembic migrations to prod via the freshly built API image, BEFORE the
+# rollout (main only). Idempotent: `alembic upgrade head` is a no-op when already
+# at head, and the Job is recreated per commit SHA so pipeline retries are safe.
+migrate:db:
+  stage: deploy
+  image:
+    name: bitnami/kubectl:latest
+    entrypoint: [""]
+  needs: [build:api]
+  variables:
+    JOB: "alembic-migrate-${CI_COMMIT_SHORT_SHA}"
+  script:
+    - echo "${KUBE_CONFIG}" | base64 -d > /tmp/kubeconfig
+    - export KUBECONFIG=/tmp/kubeconfig
+    - kubectl delete job "${JOB}" -n model-pricing --ignore-not-found
+    - |
+      cat <<EOF | kubectl apply -f -
+      apiVersion: batch/v1
+      kind: Job
+      metadata:
+        name: ${JOB}
+        namespace: model-pricing
+      spec:
+        backoffLimit: 0
+        ttlSecondsAfterFinished: 600
+        template:
+          spec:
+            restartPolicy: Never
+            containers:
+              - name: migrate
+                image: ${IMAGE_API}:${CI_COMMIT_SHORT_SHA}
+                command: ["alembic", "upgrade", "head"]
+                envFrom:
+                  - secretRef:
+                      name: model-pricing-secrets
+      EOF
+    - |
+      echo "Waiting for migration job ${JOB}..."
+      for i in $(seq 1 60); do
+        succeeded=$(kubectl get job/${JOB} -n model-pricing -o jsonpath='{.status.succeeded}' 2>/dev/null || true)
+        failed=$(kubectl get job/${JOB} -n model-pricing -o jsonpath='{.status.failed}' 2>/dev/null || true)
+        if [ "${succeeded}" = "1" ]; then
+          echo "Migration complete."; kubectl logs "job/${JOB}" -n model-pricing || true; exit 0
+        fi
+        if [ -n "${failed}" ] && [ "${failed}" != "0" ]; then
+          echo "Migration FAILED."; kubectl logs "job/${JOB}" -n model-pricing || true; exit 1
+        fi
+        sleep 3
+      done
+      echo "Migration job timed out."; kubectl logs "job/${JOB}" -n model-pricing || true; exit 1
+  only:
+    - main
+
 # Deploy to home Kubernetes cluster (main only)
 deploy:k8s:
   stage: deploy
   image:
     name: bitnami/kubectl:latest
     entrypoint: [""]
-  needs: [build:api, build:web]
+  needs: [build:api, build:web, migrate:db]
   script:
     - echo "${KUBE_CONFIG}" | base64 -d > /tmp/kubeconfig
     - export KUBECONFIG=/tmp/kubeconfig
