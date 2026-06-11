@@ -179,3 +179,78 @@ export function fmtLatency(ms: number | null | undefined): string {
   if (!ms) return "—";
   return ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${Math.round(ms)}ms`;
 }
+
+// ---------------------------------------------------------------------------
+// model-speed — https://model-speed.andrea-house.com
+// CORS is open ("*") so the browser fetches directly.
+// ---------------------------------------------------------------------------
+
+const MODEL_SPEED_BASE = "https://model-speed.andrea-house.com";
+
+export type Gateway = "openrouter" | "kilo";
+export type ProbeStatus = "ok" | "throttled" | "timeout" | "error";
+
+export interface SpeedProbeResult {
+  gateway: Gateway;
+  model_id: string;
+  model_name: string;
+  status: ProbeStatus;
+  ttft_ms: number | null;
+  tokens_per_sec: number | null;
+  total_ms: number | null;
+  completion_tokens: number | null;
+  score_ms: number | null;
+  error: string | null;
+  captured_at: string;
+  advertised_tokens_per_sec: number | null;
+  tokens_per_sec_delta: number | null;
+}
+
+export interface SpeedChainEntry {
+  rank: number;
+  gateway: Gateway;
+  model_id: string;
+  score_ms: number;
+  ttft_ms: number;
+  tokens_per_sec: number;
+}
+
+export interface SpeedChain {
+  generated_at: string;
+  run_id: number;
+  entries: SpeedChainEntry[];
+}
+
+export interface SpeedLatest {
+  run_id: number;
+  generated_at: string;
+  results: SpeedProbeResult[];
+  leaderboard: { rank: number; probe: SpeedProbeResult }[];
+  chain: SpeedChain | null;
+}
+
+export interface SpeedRunSummary {
+  id: number;
+  started_at: string;
+  finished_at: string | null;
+  ok_count: number;
+  throttled_count: number;
+  error_count: number;
+}
+
+const speedConfig: SWRConfiguration = {
+  revalidateOnFocus: false,
+  refreshInterval: 60_000,
+};
+
+export function useSpeedLatest() {
+  return useSWR<SpeedLatest>(`${MODEL_SPEED_BASE}/speed/latest`, fetcher, speedConfig);
+}
+
+export function useSpeedRuns(limit = 10) {
+  return useSWR<SpeedRunSummary[]>(
+    `${MODEL_SPEED_BASE}/speed/runs?limit=${limit}`,
+    fetcher,
+    speedConfig,
+  );
+}

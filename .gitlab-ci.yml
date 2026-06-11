@@ -153,6 +153,9 @@ deploy:k8s:
     - export KUBECONFIG=/tmp/kubeconfig
     - kubectl set image deployment/api migrate=${IMAGE_API}:${CI_COMMIT_SHORT_SHA} api=${IMAGE_API}:${CI_COMMIT_SHORT_SHA} -n model-pricing
     - kubectl set image deployment/web web=${IMAGE_WEB}:${CI_COMMIT_SHORT_SHA} -n model-pricing
+    - kubectl set image cronjob/refresh-pricing refresh=${IMAGE_API}:${CI_COMMIT_SHORT_SHA} -n model-pricing
+    - kubectl set image cronjob/daily-report report=${IMAGE_API}:${CI_COMMIT_SHORT_SHA} -n model-pricing
+    - kubectl set image cronjob/kilo-diff diff=${IMAGE_API}:${CI_COMMIT_SHORT_SHA} -n model-pricing
     - kubectl rollout status deployment/api -n model-pricing --timeout=120s
     - kubectl rollout status deployment/web -n model-pricing --timeout=120s
   only:

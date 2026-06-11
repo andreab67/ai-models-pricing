@@ -32,6 +32,7 @@ export default function RootLayout({
                 <Link href="/" className="hover:underline">Dashboard</Link>
                 <Link href="/pricing-trends" className="hover:underline">Pricing Trends</Link>
                 <Link href="/trends" className="hover:underline">All Models</Link>
+                <Link href="/speed" className="hover:underline">Speed</Link>
                 <Link href="/about" className="hover:underline">About</Link>
                 <ThemeToggle />
               </nav>
