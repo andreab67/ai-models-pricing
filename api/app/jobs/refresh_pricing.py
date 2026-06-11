@@ -14,7 +14,7 @@ async def _main() -> int:
     configure_logging()
     log = get_logger("jobs.refresh_pricing")
     try:
-        models = await refresh_pricing(persist=True)
+        models = await refresh_pricing(persist=True, enrich_speed=True)
         log.info("refresh_pricing_done", count=len(models))
         return 0
     except Exception as exc:

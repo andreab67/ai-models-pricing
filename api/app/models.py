@@ -45,6 +45,11 @@ class ModelPricingSnapshot(Base):
     supports_tools: Mapped[bool] = mapped_column(default=False)
     supports_vision: Mapped[bool] = mapped_column(default=False)
 
+    # Default-route p50 speed sampled from OpenRouter's endpoints API (nullable —
+    # only populated for models with live traffic, and never for Kilo-only models).
+    throughput_tps: Mapped[float | None] = mapped_column(Float, nullable=True)
+    latency_ms: Mapped[float | None] = mapped_column(Float, nullable=True)
+
     raw: Mapped[str] = mapped_column(Text, nullable=False)  # source JSON, debugging
 
     captured_at: Mapped[datetime] = mapped_column(

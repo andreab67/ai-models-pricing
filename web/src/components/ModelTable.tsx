@@ -2,12 +2,13 @@
 
 import { useMemo, useState } from "react";
 
-import { fmtUsd, useModels, type ModelPricing } from "@/lib/api";
+import { fmtSpeed, fmtUsd, useModels, type ModelPricing } from "@/lib/api";
 
 type SortKey =
   | "name"
   | "prompt_usd_per_mtok"
   | "completion_usd_per_mtok"
+  | "throughput_tps"
   | "context_length"
   | "max_completion_tokens"
   | "supports_vision";
@@ -118,6 +119,14 @@ export function ModelTable({ onSelect }: Props) {
                     numeric
                   />
                   <Th
+                    label="Speed"
+                    k="throughput_tps"
+                    sort={sort}
+                    asc={asc}
+                    toggle={toggleSort}
+                    numeric
+                  />
+                  <Th
                     label="Context"
                     k="context_length"
                     sort={sort}
@@ -147,7 +156,7 @@ export function ModelTable({ onSelect }: Props) {
               <tbody>
                 {visibleRows.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="px-2 py-6 text-center text-sm text-muted">
+                    <td colSpan={8} className="px-2 py-6 text-center text-sm text-muted">
                       No models match &ldquo;{query}&rdquo;
                     </td>
                   </tr>
@@ -169,6 +178,12 @@ export function ModelTable({ onSelect }: Props) {
                       </td>
                       <td className="px-2 py-1 text-right font-mono">
                         {fmtUsd(m.completion_usd_per_mtok)}
+                      </td>
+                      <td
+                        className="px-2 py-1 text-right font-mono"
+                        title={m.speed_provider ? `via ${m.speed_provider}` : undefined}
+                      >
+                        {fmtSpeed(m.throughput_tps)}
                       </td>
                       <td className="px-2 py-1 text-right font-mono">
                         {m.context_length ? m.context_length.toLocaleString() : "—"}
