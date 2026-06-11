@@ -12,28 +12,19 @@ import {
   YAxis,
 } from "recharts";
 
-import { fmtUsd, useActivity, useHistory } from "@/lib/api";
+import { fmtUsd, useHistory, useTopModels } from "@/lib/api";
 
 const CHART_BLUE = "#3b82f6";
 const CHART_GREEN = "#22c55e";
 
 export function PricingTrends() {
-  const { data: activity, isLoading } = useActivity();
+  const { data: ranked, isLoading } = useTopModels(10);
   const [selectedModel, setSelectedModel] = useState<string | null>(null);
 
-  const items = activity?.items ?? [];
-  const modelId = selectedModel ?? items[0]?.model_id ?? null;
+  const models = ranked ?? [];
+  const modelId = selectedModel ?? models[0]?.model.id ?? null;
 
   const { data: history } = useHistory(modelId, 30);
-
-  if (!isLoading && items.length === 0) return (
-    <section className="card rounded-lg p-4 w-full">
-      <h2 className="mb-1 text-lg font-semibold">Pricing Trends</h2>
-      <p className="text-sm opacity-60">
-        No OpenRouter activity found — start using models to see price trends here.
-      </p>
-    </section>
-  );
 
   const chartData =
     history?.map((h) => ({
@@ -49,32 +40,28 @@ export function PricingTrends() {
     <section className="card rounded-lg p-4 w-full">
       <h2 className="mb-1 text-lg font-semibold">Pricing Trends</h2>
       <p className="mb-4 text-xs opacity-60">
-        Price history for models you use via OpenRouter · last 30 days
+        Price history for the top coding models · last 30 days
       </p>
 
-      {isLoading && <p className="text-sm opacity-60">Loading activity…</p>}
+      {isLoading && <p className="text-sm opacity-60">Loading models…</p>}
 
-      {items.length > 0 && (
+      {models.length > 0 && (
         <>
           <div className="mb-4 flex flex-wrap gap-2" role="group" aria-label="Select model">
-            {items.map((m) => {
-              const label = m.model_id.includes("/")
-                ? m.model_id.split("/")[1]
-                : m.model_id;
-              const active = modelId === m.model_id;
+            {models.map((r) => {
+              const active = modelId === r.model.id;
               return (
                 <button
-                  key={m.model_id}
+                  key={r.model.id}
                   type="button"
-                  onClick={() => setSelectedModel(m.model_id)}
+                  onClick={() => setSelectedModel(r.model.id)}
                   className={`rounded px-3 py-1 text-xs font-medium transition-colors ${
                     active
                       ? "bg-blue-600 text-white"
                       : "bg-border text-fg/80 hover:bg-border/70"
                   }`}
                 >
-                  {label}
-                  <span className="ml-2 opacity-70">{fmtUsd(m.cost_usd)}</span>
+                  {r.model.name}
                 </button>
               );
             })}
