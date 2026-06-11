@@ -15,7 +15,14 @@ import {
   YAxis,
 } from "recharts";
 
-import { fmtUsd, useActivity, useComparison, useHistory } from "@/lib/api";
+import {
+  fmtLatency,
+  fmtSpeed,
+  fmtUsd,
+  useActivity,
+  useComparison,
+  useHistory,
+} from "@/lib/api";
 
 const CHANNEL_LABEL: Record<string, string> = {
   openrouter_payg: "OpenRouter PAYG",
@@ -137,9 +144,18 @@ export function ModelDetailModal({
 
         {comparison && (
           <>
-            <div className="grid grid-cols-2 gap-2 text-sm md:grid-cols-4">
+            <div className="grid grid-cols-2 gap-2 text-sm md:grid-cols-3">
               <Meta label="Context" value={fmtTokens(comparison.model.context_length)} />
               <Meta label="Max out" value={fmtTokens(comparison.model.max_completion_tokens)} />
+              <Meta
+                label={
+                  comparison.model.speed_provider
+                    ? `Speed (${comparison.model.speed_provider})`
+                    : "Speed"
+                }
+                value={fmtSpeed(comparison.model.throughput_tps)}
+              />
+              <Meta label="Latency" value={fmtLatency(comparison.model.latency_ms)} />
               <Meta label="Tools" value={comparison.model.supports_tools ? "yes" : "no"} />
               <Meta label="Vision" value={comparison.model.supports_vision ? "yes" : "no"} />
             </div>

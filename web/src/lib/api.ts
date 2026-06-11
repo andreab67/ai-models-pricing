@@ -12,6 +12,9 @@ export interface ModelPricing {
   max_completion_tokens: number | null;
   supports_tools: boolean;
   supports_vision: boolean;
+  throughput_tps: number | null;
+  latency_ms: number | null;
+  speed_provider: string | null;
   captured_at: string;
 }
 
@@ -166,4 +169,13 @@ export function fmtUsd(n: number): string {
   if (n < 0.01) return `$${n.toFixed(4)}`;
   if (n < 1) return `$${n.toFixed(3)}`;
   return `$${n.toFixed(2)}`;
+}
+
+export function fmtSpeed(n: number | null | undefined): string {
+  return n ? `${Math.round(n)} tok/s` : "—";
+}
+
+export function fmtLatency(ms: number | null | undefined): string {
+  if (!ms) return "—";
+  return ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${Math.round(ms)}ms`;
 }

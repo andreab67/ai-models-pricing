@@ -6,9 +6,11 @@ per-token USD strings; we convert to USD per 1M tokens for sane display.
 
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import UTC, datetime
 from typing import Any
+from urllib.parse import urlsplit
 
 import httpx
 from sqlalchemy import select
@@ -31,6 +33,15 @@ log = get_logger(__name__)
 _settings = get_settings()
 
 CACHE_KEY = "openrouter:models:normalized"
+
+# Bound concurrent endpoint requests during speed enrichment — one call per model.
+_SPEED_CONCURRENCY = 8
+
+
+def _auth_headers() -> dict[str, str]:
+    """Authorization header for OpenRouter. Required for speed stats."""
+    key = _settings.openrouter_api_key
+    return {"Authorization": f"Bearer {key}"} if key else {}
 
 
 def _to_mtok(per_token: str | float | None) -> float:
@@ -86,7 +97,9 @@ async def fetch_raw() -> list[dict[str, Any]]:
         reraise=True,
     ):
         with attempt:
-            async with httpx.AsyncClient(timeout=_settings.openrouter_timeout_s) as client:
+            async with httpx.AsyncClient(
+                timeout=_settings.openrouter_timeout_s, headers=_auth_headers()
+            ) as client:
                 resp = await client.get(url)
                 resp.raise_for_status()
                 payload = resp.json()
@@ -95,11 +108,94 @@ async def fetch_raw() -> list[dict[str, Any]]:
                     raise httpx.HTTPError("OpenRouter /models payload missing 'data' list")
                 log.info("openrouter_fetch_ok", count=len(data))
                 return data
-    return []  # unreachable; tenacity reraise=True
+    raise httpx.HTTPError("OpenRouter /models fetch exhausted retries")
 
 
-async def refresh_pricing(persist: bool = True) -> list[ModelPricing]:
-    """Fetch, normalize, cache, and (optionally) persist to Postgres."""
+def _extract_speed(
+    payload: dict[str, Any],
+) -> tuple[float | None, float | None, str | None]:
+    """Pull default-route p50 throughput/latency from an endpoints payload.
+
+    OpenRouter returns endpoints in routing-preference order. We take the first
+    endpoint that actually has a recent throughput sample — that's the speed a
+    default-routed request realistically gets. Returns (tps, latency_ms, provider).
+    """
+    endpoints = (payload.get("data") or {}).get("endpoints") or []
+    for ep in endpoints:
+        tp = (ep.get("throughput_last_30m") or {}).get("p50")
+        if tp is None:
+            continue
+        lat = (ep.get("latency_last_30m") or {}).get("p50")
+        return (
+            float(tp),
+            float(lat) if lat is not None else None,
+            ep.get("provider_name"),
+        )
+    return None, None, None
+
+
+async def enrich_speeds(
+    normalized: list[ModelPricing], raw: list[dict[str, Any]]
+) -> None:
+    """Populate throughput/latency in-place from OpenRouter's endpoints API.
+
+    Issues one authenticated request per model (bounded concurrency), so this
+    runs only in the background refresh job — never on the read path. Per-model
+    failures are tolerated: the model simply keeps null speed.
+    """
+    headers = _auth_headers()
+    if not headers:
+        log.warning("openrouter_speed_skip_no_key")
+        return
+
+    details_by_id = {
+        r.get("id"): (r.get("links") or {}).get("details") for r in raw
+    }
+    by_id = {m.id: m for m in normalized}
+    parts = urlsplit(_settings.openrouter_base_url)
+    host_root = f"{parts.scheme}://{parts.netloc}"
+    sem = asyncio.Semaphore(_SPEED_CONCURRENCY)
+
+    async with httpx.AsyncClient(
+        timeout=_settings.openrouter_timeout_s, headers=headers
+    ) as client:
+
+        async def _one(model_id: str | None, details: str | None) -> None:
+            if not model_id or not details:
+                return
+            url = f"{host_root}{details}" if details.startswith("/") else details
+            async with sem:
+                try:
+                    resp = await client.get(url)
+                    resp.raise_for_status()
+                    tps, latency, provider = _extract_speed(resp.json())
+                except (httpx.HTTPError, ValueError) as exc:
+                    log.debug(
+                        "openrouter_speed_fetch_failed", model=model_id, error=str(exc)
+                    )
+                    return
+            m = by_id.get(model_id)
+            if m is not None and tps is not None:
+                m.throughput_tps = round(tps, 1)
+                m.latency_ms = round(latency, 1) if latency is not None else None
+                m.speed_provider = provider
+
+        await asyncio.gather(
+            *(_one(mid, d) for mid, d in details_by_id.items())
+        )
+
+    enriched = sum(1 for m in normalized if m.throughput_tps is not None)
+    log.info("openrouter_speed_enrich_ok", enriched=enriched, total=len(normalized))
+
+
+async def refresh_pricing(
+    persist: bool = True, enrich_speed: bool = False
+) -> list[ModelPricing]:
+    """Fetch, normalize, cache, and (optionally) persist to Postgres.
+
+    ``enrich_speed`` adds one endpoints request per model to attach throughput/
+    latency — enable it only in the background CronJob, not on the read path.
+    """
     raw = await fetch_raw()
     normalized: list[ModelPricing] = []
     for r in raw:
@@ -107,6 +203,9 @@ async def refresh_pricing(persist: bool = True) -> list[ModelPricing]:
         if m is None:
             continue
         normalized.append(m)
+
+    if enrich_speed:
+        await enrich_speeds(normalized, raw)
 
     await cache.set(
         CACHE_KEY,
@@ -141,6 +240,8 @@ async def _persist(
                 max_completion_tokens=m.max_completion_tokens,
                 supports_tools=m.supports_tools,
                 supports_vision=m.supports_vision,
+                throughput_tps=m.throughput_tps,
+                latency_ms=m.latency_ms,
                 raw=json.dumps(raw_by_id.get(m.id) or {}),
                 captured_at=now,
             ).on_conflict_do_nothing(constraint="uq_model_captured")
@@ -194,6 +295,8 @@ async def get_history(model_id: str, days: int = 30) -> list[ModelPricing]:
             max_completion_tokens=row.max_completion_tokens,
             supports_tools=row.supports_tools,
             supports_vision=row.supports_vision,
+            throughput_tps=row.throughput_tps,
+            latency_ms=row.latency_ms,
             captured_at=row.captured_at,
         )
         for row in rows

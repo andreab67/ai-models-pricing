@@ -25,6 +25,15 @@ class ModelPricing(BaseModel):
     max_completion_tokens: int | None = None
     supports_tools: bool = False
     supports_vision: bool = False
+    throughput_tps: float | None = Field(
+        default=None, description="Default-route p50 throughput, tokens/sec (OpenRouter)"
+    )
+    latency_ms: float | None = Field(
+        default=None, description="Default-route p50 latency to first token, ms (OpenRouter)"
+    )
+    speed_provider: str | None = Field(
+        default=None, description="Provider the speed sample came from"
+    )
     captured_at: datetime
 
 
