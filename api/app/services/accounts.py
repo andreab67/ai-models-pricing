@@ -114,57 +114,59 @@ _ACTIVITY_CACHE_KEY = "accounts:activity"
 _ACTIVITY_CACHE_TTL = 900  # 15 min
 
 
+def _to_int(v: object) -> int:
+    """Analytics query returns counts/tokens as strings; coerce safely."""
+    try:
+        return int(float(v)) if v is not None else 0
+    except (TypeError, ValueError):
+        return 0
+
+
 async def get_activity() -> ActivityResponse:
     cached = await cache.get(_ACTIVITY_CACHE_KEY)
     if cached:
         return ActivityResponse.model_validate(cached)
 
-    # Activity endpoint requires management key; fall back to regular key if admin not set
+    # Beta analytics query requires a management key; fall back to regular key.
+    # We use /analytics/query (not /activity) because /activity excludes the
+    # current UTC day until it closes — analytics/query includes today, matching
+    # the OpenRouter dashboard exactly.
     key = _settings.openrouter_admin_key or _settings.openrouter_api_key
     if not key:
         return ActivityResponse(items=[], fetched_at=datetime.now(UTC))
 
-    async with httpx.AsyncClient(timeout=15.0) as client:
+    body = {
+        "metrics": ["request_count", "total_usage", "tokens_prompt", "tokens_completion"],
+        "dimensions": ["model"],
+        "order_by": {"field": "total_usage", "direction": "desc"},
+    }
+
+    async with httpx.AsyncClient(timeout=20.0) as client:
         try:
-            resp = await client.get(
-                "https://openrouter.ai/api/v1/activity",
-                headers={"Authorization": f"Bearer {key}"},
+            resp = await client.post(
+                "https://openrouter.ai/api/v1/analytics/query",
+                headers={
+                    "Authorization": f"Bearer {key}",
+                    "Content-Type": "application/json",
+                },
+                json=body,
             )
             resp.raise_for_status()
-            raw = resp.json()
-            log.debug("openrouter_activity_raw", keys=list(raw.keys()))
-
-            # Response shape: {"data": [{model_id, requests, prompt_tokens,
-            #   completion_tokens, total_cost / cost / ...}, ...]}
-            entries = raw.get("data") or raw.get("activity") or []
-            # Aggregate by model_id — API returns one row per key/date bucket
-            agg: dict[str, ModelActivityItem] = {}
-            for e in entries:
-                model_id = e.get("model") or e.get("model_id") or ""
-                if not model_id:
-                    continue
-                cost = float(e.get("total_cost") or e.get("cost") or e.get("usage") or 0)
-                reqs = int(e.get("requests") or e.get("count") or 0)
-                p_tok = int(e.get("prompt_tokens") or e.get("input_tokens") or 0)
-                c_tok = int(e.get("completion_tokens") or e.get("output_tokens") or 0)
-                if model_id in agg:
-                    existing = agg[model_id]
-                    agg[model_id] = ModelActivityItem(
-                        model_id=model_id,
-                        requests=existing.requests + reqs,
-                        prompt_tokens=existing.prompt_tokens + p_tok,
-                        completion_tokens=existing.completion_tokens + c_tok,
-                        cost_usd=round(existing.cost_usd + cost, 6),
-                    )
-                else:
-                    agg[model_id] = ModelActivityItem(
-                        model_id=model_id,
-                        requests=reqs,
-                        prompt_tokens=p_tok,
-                        completion_tokens=c_tok,
-                        cost_usd=round(cost, 6),
-                    )
-            items = sorted(agg.values(), key=lambda x: x.cost_usd, reverse=True)
+            # Shape: {"data": {"data": [{model, request_count, total_usage,
+            #   tokens_prompt, tokens_completion}, ...], "metadata": {...}}}
+            rows = (resp.json().get("data") or {}).get("data") or []
+            items = [
+                ModelActivityItem(
+                    model_id=model_id,
+                    requests=_to_int(r.get("request_count")),
+                    prompt_tokens=_to_int(r.get("tokens_prompt")),
+                    completion_tokens=_to_int(r.get("tokens_completion")),
+                    cost_usd=round(float(r.get("total_usage") or 0), 6),
+                )
+                for r in rows
+                if (model_id := r.get("model"))
+            ]
+            items.sort(key=lambda x: x.cost_usd, reverse=True)
             result = ActivityResponse(items=items, fetched_at=datetime.now(UTC))
         except Exception as exc:
             log.warning("openrouter_activity_failed", error=str(exc))
