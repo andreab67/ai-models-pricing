@@ -79,7 +79,7 @@ function OpenRouterCard({ account }: { account: AccountProviderUsage }) {
           <div className="pt-2 border-t border-border space-y-2">
             <div className="flex items-center justify-between">
               <span className="text-xs font-semibold uppercase tracking-wider text-muted">
-                OpenRouter Models Used · Last 30 Days
+                OpenRouter Models Used
               </span>
               {totalSpend != null && (
                 <span className="text-xs font-mono text-muted">{fmtUsd(totalSpend)}</span>
