@@ -89,7 +89,18 @@ function OpenRouterCard({ account }: { account: AccountProviderUsage }) {
             {!activityData ? (
               <p className="text-xs text-muted">Loading…</p>
             ) : activityData.items.length === 0 ? (
-              <p className="text-xs text-muted">No activity in the last 30 days.</p>
+              <p className="text-xs text-muted/60">
+                Requires OpenRouter management key —{" "}
+                <a
+                  href="https://openrouter.ai/settings/keys"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="underline hover:text-muted"
+                >
+                  generate one
+                </a>
+                {" "}and set OPENROUTER_ADMIN_KEY in cluster secret
+              </p>
             ) : (
               <table className="w-full text-xs">
                 <thead>

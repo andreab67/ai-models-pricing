@@ -119,7 +119,8 @@ async def get_activity() -> ActivityResponse:
     if cached:
         return ActivityResponse.model_validate(cached)
 
-    key = _settings.openrouter_api_key
+    # Activity endpoint requires management key; fall back to regular key if admin not set
+    key = _settings.openrouter_admin_key or _settings.openrouter_api_key
     if not key:
         return ActivityResponse(items=[], fetched_at=datetime.now(UTC))
 
