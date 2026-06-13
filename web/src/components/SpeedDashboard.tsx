@@ -20,7 +20,7 @@ function GwBadge({ gw }: { gw: Gateway }) {
   }
   return (
     <span className="inline-block text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-sky-600 text-white mr-1.5">
-      OR
+      OPENROUTER
     </span>
   );
 }
