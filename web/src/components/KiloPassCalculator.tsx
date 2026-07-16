@@ -99,7 +99,7 @@ function Stat({
 }) {
   return (
     <div
-      className={`rounded border border-border px-2 py-1${highlight ? " bg-accent/[0.08]" : ""}`}
+      className={`rounded border border-border px-2 py-1${highlight ? " bg-accent/8" : ""}`}
     >
       <div className="text-xs opacity-60">{label}</div>
       <div className="font-mono text-sm">{value}</div>
