@@ -19,8 +19,8 @@ from app.services.cache import cache
 log = get_logger(__name__)
 _settings = get_settings()
 
-CACHE_KEY = "kilo:models:normalized"
-_CACHE_TTL = 900  # 15 min
+KILO_MODELS_CACHE_KEY = "kilo:models:normalized"
+_KILO_MODELS_CACHE_TTL = 900  # 15 min
 _BASE_URL = "https://api.kilo.ai/api/gateway"
 
 
@@ -73,7 +73,7 @@ async def fetch_models() -> list[ModelPricing]:
     if not key:
         return []
 
-    cached = await cache.get(CACHE_KEY)
+    cached = await cache.get(KILO_MODELS_CACHE_KEY)
     if cached:
         return [ModelPricing.model_validate(m) for m in cached]
 
@@ -88,9 +88,9 @@ async def fetch_models() -> list[ModelPricing]:
             normalized = [m for r in data if (m := _normalize(r)) is not None]
             if normalized:
                 await cache.set(
-                    CACHE_KEY,
+                    KILO_MODELS_CACHE_KEY,
                     [m.model_dump(mode="json") for m in normalized],
-                    ttl=_CACHE_TTL,
+                    ttl=_KILO_MODELS_CACHE_TTL,
                 )
             log.info("kilo_models_fetch_ok", count=len(normalized))
             return normalized

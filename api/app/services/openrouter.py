@@ -30,7 +30,7 @@ from app.services.cache import cache
 log = get_logger(__name__)
 _settings = get_settings()
 
-CACHE_KEY = "openrouter:models:normalized"
+OPENROUTER_MODELS_CACHE_KEY = "openrouter:models:normalized"
 
 
 def _to_mtok(per_token: str | float | None) -> float:
@@ -109,7 +109,7 @@ async def refresh_pricing(persist: bool = True) -> list[ModelPricing]:
         normalized.append(m)
 
     await cache.set(
-        CACHE_KEY,
+        OPENROUTER_MODELS_CACHE_KEY,
         [m.model_dump(mode="json") for m in normalized],
         ttl=_settings.openrouter_refresh_seconds,
     )
@@ -151,7 +151,7 @@ async def _persist(
 async def list_models(use_cache: bool = True) -> list[ModelPricing]:
     """Public read path. Returns cached models or refreshes on miss."""
     if use_cache:
-        cached = await cache.get(CACHE_KEY)
+        cached = await cache.get(OPENROUTER_MODELS_CACHE_KEY)
         if cached:
             return [ModelPricing.model_validate(c) for c in cached]
     return await refresh_pricing(persist=False)

@@ -16,8 +16,8 @@ from app.services.kilo import load_plans
 log = get_logger(__name__)
 _settings = get_settings()
 
-_CACHE_KEY = "accounts:usage"
-_CACHE_TTL = 120  # 2 min — balance data should be fairly fresh
+_USAGE_CACHE_KEY = "accounts:usage"
+_USAGE_CACHE_TTL = 120  # 2 min — balance data should be fairly fresh
 
 
 async def _check_openrouter() -> AccountProviderUsage:
@@ -224,16 +224,16 @@ async def _check_anthropic() -> AccountProviderUsage:
             return AccountProviderUsage(provider="anthropic", configured=True, error=str(exc)[:80])
 
 
-_ACTIVITY_CACHE_KEY = "accounts:activity"
-_ACTIVITY_CACHE_TTL = 900  # 15 min
+_OPENROUTER_ACTIVITY_CACHE_KEY = "accounts:activity"
+_OPENROUTER_ACTIVITY_CACHE_TTL = 900  # 15 min
+
+_OPENAI_ACTIVITY_CACHE_KEY = "accounts:openai_activity"
+_OPENAI_ACTIVITY_CACHE_TTL = 900  # 15 min
 
 
 async def get_openai_activity() -> ActivityResponse:
     """Fetch OpenAI costs by model from the cost report API (last 30 days)."""
-    cache_key = "accounts:openai_activity"
-    cache_ttl = 900  # 15 min
-
-    cached = await cache.get(cache_key)
+    cached = await cache.get(_OPENAI_ACTIVITY_CACHE_KEY)
     if cached:
         return ActivityResponse.model_validate(cached)
 
@@ -284,12 +284,14 @@ async def get_openai_activity() -> ActivityResponse:
             log.warning("openai_activity_failed", error=str(exc))
             result = ActivityResponse(items=[], fetched_at=datetime.now(UTC))
 
-    await cache.set(cache_key, result.model_dump(mode="json"), ttl=cache_ttl)
+    await cache.set(
+        _OPENAI_ACTIVITY_CACHE_KEY, result.model_dump(mode="json"), ttl=_OPENAI_ACTIVITY_CACHE_TTL
+    )
     return result
 
 
 async def get_activity() -> ActivityResponse:
-    cached = await cache.get(_ACTIVITY_CACHE_KEY)
+    cached = await cache.get(_OPENROUTER_ACTIVITY_CACHE_KEY)
     if cached:
         return ActivityResponse.model_validate(cached)
 
@@ -343,12 +345,16 @@ async def get_activity() -> ActivityResponse:
             log.warning("openrouter_activity_failed", error=str(exc))
             result = ActivityResponse(items=[], fetched_at=datetime.now(UTC))
 
-    await cache.set(_ACTIVITY_CACHE_KEY, result.model_dump(mode="json"), ttl=_ACTIVITY_CACHE_TTL)
+    await cache.set(
+        _OPENROUTER_ACTIVITY_CACHE_KEY,
+        result.model_dump(mode="json"),
+        ttl=_OPENROUTER_ACTIVITY_CACHE_TTL,
+    )
     return result
 
 
 async def get_usage() -> AccountsUsage:
-    cached = await cache.get(_CACHE_KEY)
+    cached = await cache.get(_USAGE_CACHE_KEY)
     if cached:
         return AccountsUsage.model_validate(cached)
 
@@ -365,5 +371,5 @@ async def get_usage() -> AccountsUsage:
         anthropic=anthropic,
         fetched_at=datetime.now(UTC),
     )
-    await cache.set(_CACHE_KEY, result.model_dump(mode="json"), ttl=_CACHE_TTL)
+    await cache.set(_USAGE_CACHE_KEY, result.model_dump(mode="json"), ttl=_USAGE_CACHE_TTL)
     return result

@@ -13,9 +13,8 @@ import {
 } from "recharts";
 
 import { fmtUsd, useActivity, useHistory } from "@/lib/api";
+import { CHART_BLUE, CHART_GREEN } from "@/lib/chartTheme";
 
-const CHART_BLUE = "#3b82f6";
-const CHART_GREEN = "#22c55e";
 
 export function PricingTrends() {
   const { data: activity, isLoading } = useActivity();

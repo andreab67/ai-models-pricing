@@ -16,6 +16,7 @@ import {
 } from "recharts";
 
 import { fmtUsd, useActivity, useComparison, useHistory } from "@/lib/api";
+import { CHART_BLUE, CHART_GREEN } from "@/lib/chartTheme";
 
 const CHANNEL_LABEL: Record<string, string> = {
   openrouter_payg: "OpenRouter PAYG",
@@ -24,8 +25,6 @@ const CHANNEL_LABEL: Record<string, string> = {
   kilo_byok: "Kilo BYOK",
 };
 
-const CHART_BLUE = "#3b82f6";
-const CHART_GREEN = "#22c55e";
 
 interface Props {
   modelId: string | null;
