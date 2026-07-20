@@ -13,9 +13,7 @@ import {
 } from "recharts";
 
 import { fmtUsd, useHistory, useTopModels } from "@/lib/api";
-
-const CHART_BLUE = "#3b82f6";
-const CHART_GREEN = "#22c55e";
+import { CHART_BLUE, CHART_GREEN } from "@/lib/chartColors";
 
 export function PricingTrends() {
   const { data: ranked, isLoading } = useTopModels(10);

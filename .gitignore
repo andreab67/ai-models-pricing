@@ -37,3 +37,11 @@ build/
 
 # kube
 *.kubeconfig
+
+# VarAlign local store: intentionally not mentioned here. .varmem/.gitignore
+# fully self-manages what's tracked (only .gitignore/reviews.json/config.json)
+# vs ignored (vars/, events.jsonl, meta.json) — a root-level entry here would
+# either re-break that (a bare `.varmem/` excludes the whole dir, which
+# prevents the nested .gitignore's negation rules from ever taking effect)
+# or be redundant with it (a `.varmem/*` entry decides nothing the nested
+# file doesn't already decide on its own).

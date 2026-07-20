@@ -23,6 +23,7 @@ import {
   useComparison,
   useHistory,
 } from "@/lib/api";
+import { CHART_BLUE, CHART_GREEN } from "@/lib/chartColors";
 
 const CHANNEL_LABEL: Record<string, string> = {
   openrouter_payg: "OpenRouter PAYG",
@@ -30,9 +31,6 @@ const CHANNEL_LABEL: Record<string, string> = {
   kilo_pass: "Kilo Pass",
   kilo_byok: "Kilo BYOK",
 };
-
-const CHART_BLUE = "#3b82f6";
-const CHART_GREEN = "#22c55e";
 
 interface Props {
   modelId: string | null;
