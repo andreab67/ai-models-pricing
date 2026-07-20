@@ -1,0 +1,17 @@
+# Normalize line endings to LF in the repository regardless of platform —
+# this repo's CI/deploy targets are all Linux (kaniko builds, GitLab
+# Runner), and mixed CRLF/LF checked in by different contributors' local
+# core.autocrlf settings produces spurious whole-file diffs and false merge
+# conflicts (see the model-pricing code review that added this file).
+* text=auto eol=lf
+
+# Known binary assets — no line-ending conversion, no textual diffing.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.eot binary
