@@ -15,7 +15,12 @@ import httpx
 
 from app.config import get_settings
 from app.logging import get_logger
-from app.schemas import KiloExtractedPricing
+from app.schemas import (
+    KiloBonusGrowth,
+    KiloExtractedPricing,
+    KiloPlan,
+    KiloPricePrimitives,
+)
 
 log = get_logger(__name__)
 _settings = get_settings()
@@ -23,33 +28,42 @@ _settings = get_settings()
 _REQUIRED_TIERS = {"starter", "pro", "expert"}
 _PRICE_FIELDS = ("monthly_usd", "paid_credits_usd", "annual_usd")
 
-_SYSTEM_PROMPT = """\
-You read the visible text of the kilo.ai/pricing page and extract the Kilo \
-Pass subscription tier figures as JSON. Only use numbers that are explicitly \
-present in the given text — never estimate or invent a value.
+# The page advertises "40% max bonus unlocked by month 8" at +5%/month. The
+# bonus-growth schedule is a *model* anchored to that, not per-tier scraped
+# data, so we derive it in code from the observed cap rather than asking the
+# LLM to read a schedule the page never lists explicitly.
+_BONUS_CAP_ANCHOR_MONTHS = 8
+_BONUS_BASELINE_PCT = 0.05
 
-Respond with ONLY a JSON object (no markdown fences, no commentary) shaped \
-exactly like this:
+# We ask the LLM for ONLY the numbers literally printed per tier: the monthly
+# price and the "Up to $X/mo in credits" figure, plus the single annual-bonus
+# headline. Everything else (max_bonus_pct, annual_usd, bonus_growth) is
+# computed deterministically — the page shows no per-tier annual prices, and
+# asking the model to produce them is what caused it to mis-assign a value.
+_SYSTEM_PROMPT = """\
+You read the visible text of the kilo.ai/pricing page and extract ONLY facts \
+that are literally printed there, as JSON. Never estimate, compute, or invent \
+a value — if a number is not on the page, do not include it.
+
+For each of the three Kilo Pass subscription tiers (starter, pro, expert), \
+extract:
+  - monthly_usd: the "$X/mo" subscription price
+  - max_credits_usd: the "Up to $Y/mo in credits" figure shown for that tier
+
+Also extract:
+  - annual_bonus_pct: the annual-plan bonus as a fraction (the "Annual 50% \
+bonus" headline -> 0.50)
+
+Respond with ONLY this JSON object (no markdown fences, no commentary):
 {
-  "plans": [
-    {
-      "tier": "starter" | "pro" | "expert",
-      "monthly_usd": <monthly subscription price in USD>,
-      "paid_credits_usd": <USD credits granted for the monthly price>,
-      "max_bonus_pct": <max bonus credit fraction on monthly plans, e.g. 0.40 for 40%>,
-      "annual_usd": <annual prepaid price in USD, or null if not stated>,
-      "annual_bonus_pct": <bonus credit fraction on annual plans, or null if not stated>
-    },
-    ... one entry each for starter, pro, expert
+  "tiers": [
+    {"tier": "starter", "monthly_usd": 0, "max_credits_usd": 0},
+    {"tier": "pro", "monthly_usd": 0, "max_credits_usd": 0},
+    {"tier": "expert", "monthly_usd": 0, "max_credits_usd": 0}
   ],
-  "bonus_growth": {
-    "welcome_pct": <month-1 welcome bonus fraction, e.g. 0.50 for 50%>,
-    "baseline_pct": <starting monthly bonus fraction from month 2>,
-    "step_pct": <per-month bonus growth fraction>,
-    "cap_pct": <max monthly bonus fraction cap, e.g. 0.40 for 40%>
-  }
+  "annual_bonus_pct": 0
 }
-All percentages are fractions (40% -> 0.40), not whole numbers.
+Percentages are fractions (50% -> 0.50), not whole numbers.
 """
 
 
@@ -65,10 +79,45 @@ def _build_request_payload(page_text: str) -> dict[str, Any]:
     }
 
 
-def _parse_extraction_response(raw: dict[str, Any]) -> KiloExtractedPricing:
+def _parse_primitives(raw: dict[str, Any]) -> KiloPricePrimitives:
     content = raw["choices"][0]["message"]["content"]
     data = json.loads(content)
-    return KiloExtractedPricing.model_validate(data)
+    return KiloPricePrimitives.model_validate(data)
+
+
+def reconstruct(primitives: KiloPricePrimitives) -> KiloExtractedPricing:
+    """Build the full pricing shape from the on-page primitives.
+
+    Deterministic: max_bonus_pct comes from (max_credits / monthly - 1),
+    annual_usd from monthly x 12, and the bonus-growth schedule from the
+    observed cap. This reproduces the hand-maintained kilo_plans.yaml exactly
+    when the page is unchanged, so a wording-only hash change yields no diff.
+    """
+    plans: list[KiloPlan] = []
+    for t in primitives.tiers:
+        if t.monthly_usd <= 0:
+            raise ValueError(f"{t.tier} monthly_usd non-positive: {t.monthly_usd}")
+        monthly = float(t.monthly_usd)
+        max_bonus_pct = round(t.max_credits_usd / monthly - 1, 2)
+        plans.append(
+            KiloPlan(
+                tier=t.tier,
+                monthly_usd=monthly,
+                paid_credits_usd=monthly,  # credits granted at par with the price
+                max_bonus_pct=max_bonus_pct,
+                annual_usd=round(monthly * 12, 2),
+                annual_bonus_pct=primitives.annual_bonus_pct,
+            )
+        )
+
+    cap_pct = max((p.max_bonus_pct for p in plans), default=0.0)
+    bonus_growth = KiloBonusGrowth(
+        welcome_pct=primitives.annual_bonus_pct,
+        baseline_pct=_BONUS_BASELINE_PCT,
+        step_pct=round(cap_pct / _BONUS_CAP_ANCHOR_MONTHS, 2),
+        cap_pct=cap_pct,
+    )
+    return KiloExtractedPricing(plans=plans, bonus_growth=bonus_growth)
 
 
 async def extract_pricing(page_text: str) -> KiloExtractedPricing:
@@ -77,7 +126,8 @@ async def extract_pricing(page_text: str) -> KiloExtractedPricing:
     async with httpx.AsyncClient(timeout=60.0, headers=headers) as client:
         resp = await client.post(url, json=_build_request_payload(page_text))
         resp.raise_for_status()
-        return _parse_extraction_response(resp.json())
+        primitives = _parse_primitives(resp.json())
+    return reconstruct(primitives)
 
 
 def _plan_map(plans: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:

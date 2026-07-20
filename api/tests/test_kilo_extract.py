@@ -7,7 +7,7 @@ import json
 import pytest
 import yaml
 
-from app.schemas import KiloExtractedPricing
+from app.schemas import KiloExtractedPricing, KiloPricePrimitives
 from app.services import kilo_extract
 
 
@@ -135,13 +135,72 @@ def test_render_kilo_plans_yaml_round_trips() -> None:
     assert "auto-updated by the kilo_diff CronJob" in rendered
 
 
-def test_parse_extraction_response_validates_shape() -> None:
-    current = _current()
-    content = json.dumps({"plans": current["plans"], "bonus_growth": current["bonus_growth"]})
-    raw = {"choices": [{"message": {"content": content}}]}
-    parsed = kilo_extract._parse_extraction_response(raw)
-    assert isinstance(parsed, KiloExtractedPricing)
-    assert {p.tier for p in parsed.plans} == {"starter", "pro", "expert"}
+_LIVE_PRIMITIVES = {
+    "tiers": [
+        {"tier": "starter", "monthly_usd": 19, "max_credits_usd": 26.6},
+        {"tier": "pro", "monthly_usd": 49, "max_credits_usd": 68.6},
+        {"tier": "expert", "monthly_usd": 199, "max_credits_usd": 278.6},
+    ],
+    "annual_bonus_pct": 0.5,
+}
+
+
+def test_reconstruct_reproduces_current_yaml() -> None:
+    """The on-page primitives must rebuild the hand-maintained values exactly."""
+    prim = KiloPricePrimitives.model_validate(_LIVE_PRIMITIVES)
+    rebuilt = kilo_extract.reconstruct(prim)
+
+    # identical to _current() -> a wording-only hash change yields no diff
+    assert kilo_extract.diff_from_current(_current(), rebuilt) is None
+
+    starter = next(p for p in rebuilt.plans if p.tier == "starter")
+    assert starter.monthly_usd == pytest.approx(19.0)
+    assert starter.paid_credits_usd == pytest.approx(19.0)
+    assert starter.max_bonus_pct == pytest.approx(0.40)  # 26.6/19 - 1
+    assert starter.annual_usd == pytest.approx(228.0)  # 19 x 12
+    assert starter.annual_bonus_pct == pytest.approx(0.50)
+
+    assert rebuilt.bonus_growth.cap_pct == pytest.approx(0.40)
+    assert rebuilt.bonus_growth.step_pct == pytest.approx(0.05)  # 0.40 / 8
+    assert rebuilt.bonus_growth.welcome_pct == pytest.approx(0.50)
+
+
+def test_reconstruct_rejects_non_positive_monthly() -> None:
+    prim = KiloPricePrimitives.model_validate(
+        {
+            "tiers": [
+                {"tier": "starter", "monthly_usd": 0, "max_credits_usd": 26.6},
+                {"tier": "pro", "monthly_usd": 49, "max_credits_usd": 68.6},
+                {"tier": "expert", "monthly_usd": 199, "max_credits_usd": 278.6},
+            ],
+            "annual_bonus_pct": 0.5,
+        }
+    )
+    with pytest.raises(ValueError, match="non-positive"):
+        kilo_extract.reconstruct(prim)
+
+
+def test_reconstruct_tracks_a_real_price_change() -> None:
+    changed = {
+        "tiers": [
+            {"tier": "starter", "monthly_usd": 24, "max_credits_usd": 33.6},  # 24 -> 40% bonus
+            {"tier": "pro", "monthly_usd": 49, "max_credits_usd": 68.6},
+            {"tier": "expert", "monthly_usd": 199, "max_credits_usd": 278.6},
+        ],
+        "annual_bonus_pct": 0.5,
+    }
+    rebuilt = kilo_extract.reconstruct(KiloPricePrimitives.model_validate(changed))
+    diff = kilo_extract.diff_from_current(_current(), rebuilt)
+    assert diff is not None
+    assert diff["starter"]["monthly_usd"] == {"old": 19.0, "new": 24.0}
+    assert diff["starter"]["annual_usd"] == {"old": 228.0, "new": 288.0}
+
+
+def test_parse_primitives_validates_shape() -> None:
+    raw = {"choices": [{"message": {"content": json.dumps(_LIVE_PRIMITIVES)}}]}
+    parsed = kilo_extract._parse_primitives(raw)
+    assert isinstance(parsed, KiloPricePrimitives)
+    assert {t.tier for t in parsed.tiers} == {"starter", "pro", "expert"}
 
 
 def test_build_request_payload_uses_configured_model_and_json_mode() -> None:

@@ -76,8 +76,28 @@ class KiloBonusGrowth(BaseModel):
     cap_pct: float
 
 
+class KiloTierPrimitive(BaseModel):
+    """The only per-tier facts literally printed on kilo.ai/pricing.
+
+    Everything else (max_bonus_pct, annual_usd, bonus_growth) is derived from
+    these in code — see kilo_extract.reconstruct — because the page shows no
+    per-tier annual prices, only monthly price + "Up to $X/mo in credits".
+    """
+
+    tier: str
+    monthly_usd: float          # the "$X/mo" price
+    max_credits_usd: float      # the "Up to $Y/mo in credits" figure
+
+
+class KiloPricePrimitives(BaseModel):
+    """Narrow LLM extraction target — only unambiguous, on-page numbers."""
+
+    tiers: list[KiloTierPrimitive]
+    annual_bonus_pct: float     # the "Annual 50% bonus" headline, as a fraction
+
+
 class KiloExtractedPricing(BaseModel):
-    """Structured output shape for LLM extraction of kilo.ai/pricing."""
+    """Reconstructed full pricing shape (from KiloPricePrimitives)."""
 
     plans: list[KiloPlan]
     bonus_growth: KiloBonusGrowth

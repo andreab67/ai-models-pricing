@@ -103,9 +103,13 @@ def _hash_text(text: str) -> str:
 
 
 async def fetch_pricing_hash() -> tuple[str, str]:
-    """Return (hash, visible_text) of the Kilo pricing page.
+    """Return (hash, structured_text) of the Kilo pricing page.
 
-    Used by the weekly CronJob to detect tier changes.
+    The hash is computed on the space-normalized visible text (stable across
+    cache busters) — unchanged from before, so stored hashes stay valid. The
+    returned text is instead newline-structured (one visible block per line)
+    so the extractor can tell tier rows apart; flattening everything onto one
+    line is what previously let the LLM mis-assign a number to the wrong tier.
     """
     async with httpx.AsyncClient(
         timeout=20.0,
@@ -117,5 +121,8 @@ async def fetch_pricing_hash() -> tuple[str, str]:
         # strip script/style noise so the hash is stable across cache busters
         for tag in soup(["script", "style", "noscript"]):
             tag.decompose()
-        text = " ".join(soup.get_text(" ").split())
-        return _hash_text(text), text
+        normalized = " ".join(soup.get_text(" ").split())
+        structured = "\n".join(
+            line.strip() for line in soup.get_text("\n").splitlines() if line.strip()
+        )
+        return _hash_text(normalized), structured
