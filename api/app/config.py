@@ -34,6 +34,14 @@ class Settings(BaseSettings):
     kilo_plans_path: Path = Field(default=Path(__file__).parent / "data" / "kilo_plans.yaml")
     kilo_pricing_url: str = Field(default="https://kilo.ai/pricing")
     kilo_diff_user_agent: str = Field(default="model-pricing-bot/0.1 (+andrea-house.com)")
+    kilo_extraction_model: str = Field(default="anthropic/claude-haiku-4.5")
+    kilo_sanity_max_delta_pct: float = Field(default=0.50)
+
+    # --- gitlab (kilo_diff auto-commit) ------------------------------------
+    gitlab_api_url: str = Field(default="https://gitlab.andrea-house.com/api/v4")
+    gitlab_project_id: int = Field(default=54)
+    gitlab_project_path: str = Field(default="root/model-pricing")
+    gitlab_token: str = Field(default="")
 
     # --- redis ------------------------------------------------------------
     redis_url: str = Field(default="redis://localhost:6379/0")

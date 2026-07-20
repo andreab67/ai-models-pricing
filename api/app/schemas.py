@@ -69,6 +69,20 @@ class KiloPlan(BaseModel):
     annual_bonus_pct: float | None = None
 
 
+class KiloBonusGrowth(BaseModel):
+    welcome_pct: float
+    baseline_pct: float
+    step_pct: float
+    cap_pct: float
+
+
+class KiloExtractedPricing(BaseModel):
+    """Structured output shape for LLM extraction of kilo.ai/pricing."""
+
+    plans: list[KiloPlan]
+    bonus_growth: KiloBonusGrowth
+
+
 class KiloProjection(BaseModel):
     tier: str
     streak_months: int

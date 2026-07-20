@@ -30,6 +30,15 @@ def load_plans() -> list[KiloPlan]:
     return [KiloPlan.model_validate(p) for p in data["plans"]]
 
 
+def load_raw() -> dict:
+    """Raw parsed kilo_plans.yaml — {'plans': [...], 'bonus_growth': {...}}.
+
+    Used by the kilo_diff CronJob to diff/sanity-check an LLM extraction
+    against the current on-disk values.
+    """
+    return _load_yaml()
+
+
 def monthly_bonus_pct(streak_months: int, growth: dict) -> float:
     """Return Kilo's published bonus % for a given subscription streak.
 
