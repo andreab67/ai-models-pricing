@@ -107,6 +107,10 @@ async def _main() -> int:
     except Exception as exc:
         log.error("kilo_diff_failed", error=str(exc), exc_info=True)
         return 1
+    finally:
+        # Close the Redis connection before the loop tears down, else redis-py's
+        # async deallocator logs a noisy "Event loop is closed" traceback on exit.
+        await cache.close()
 
 
 if __name__ == "__main__":
