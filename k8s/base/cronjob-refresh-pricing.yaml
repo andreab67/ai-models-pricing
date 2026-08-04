@@ -10,7 +10,15 @@ spec:
   startingDeadlineSeconds: 120
   jobTemplate:
     spec:
-      backoffLimit: 2
+      # 2 -> 4 (2026-07-28): failed 5 times today (00:20, 00:25, 00:45, 04:30,
+      # 04:35 MDT), all inside the home cluster's two nightly node-rotation
+      # windows — a dependency pod (DB/API backend) was mid-reschedule and the
+      # 2-retry budget (10s+20s ~= 30s of backoff) didn't outlast the gap.
+      # Every run since has succeeded; the 5-min schedule already makes a
+      # single missed tick harmless, so this is about wasting fewer runs to
+      # a known-transient window, not an outage. 4 retries stays well inside
+      # activeDeadlineSeconds (cumulative backoff 10+20+40+80=150s of 300s).
+      backoffLimit: 4
       activeDeadlineSeconds: 300
       template:
         spec:
