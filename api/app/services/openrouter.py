@@ -164,6 +164,15 @@ async def enrich_speeds(
             if not model_id or not details:
                 return
             url = f"{host_root}{details}" if details.startswith("/") else details
+            # Guard: never attach the bearer token to a host outside the allowlist.
+            # Both the prefix-join case (URL inherits host_root) and the absolute-URL
+            # case are checked against the same set so a hijacked catalog can't
+            # exfiltrate the OpenRouter API key.
+            if not _is_allowed_detail_url(url):
+                log.warning(
+                    "openrouter_speed_url_rejected", model=model_id, url=url,
+                )
+                return
             async with sem:
                 try:
                     resp = await client.get(url)
@@ -186,6 +195,20 @@ async def enrich_speeds(
 
     enriched = sum(1 for m in normalized if m.throughput_tps is not None)
     log.info("openrouter_speed_enrich_ok", enriched=enriched, total=len(normalized))
+
+
+# Allowlist of hosts we will attach the OpenRouter bearer token to. This blocks
+# SSRF-via-catalog: if a model's `links.details` URL is hijacked to an
+# attacker-controlled host, we refuse to send the Authorization header there.
+_ALLOWED_DETAIL_HOSTS = frozenset({"openrouter.ai"})
+
+
+def _is_allowed_detail_url(url: str) -> bool:
+    parts = urlsplit(url)
+    if parts.scheme not in ("http", "https"):
+        return False
+    host = parts.hostname or ""
+    return any(host == h or host.endswith(f".{h}") for h in _ALLOWED_DETAIL_HOSTS)
 
 
 async def refresh_pricing(

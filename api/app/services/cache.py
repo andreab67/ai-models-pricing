@@ -36,7 +36,11 @@ class Cache:
         if self._client is None:
             try:
                 self._client = redis.from_url(self._url, decode_responses=True)
-                await self._client.ping()
+                # redis-py returns Awaitable[bool] from a sync call site under
+                # type stubs but a raw bool in the legacy stubs mypy ships with.
+                ping_result = self._client.ping()
+                if asyncio.iscoroutine(ping_result):
+                    await ping_result
             except Exception as exc:
                 safe_url = re.sub(r":[^@]+@", ":@", self._url)
                 log.warning("redis_unavailable", url=safe_url, error=str(exc))
@@ -50,7 +54,15 @@ class Cache:
                 raw = await client.get(key)
                 if raw is None:
                     return None
-                return json.loads(raw)
+                try:
+                    return json.loads(raw)
+                except json.JSONDecodeError:
+                    log.warning("cache_corrupt_value", key=key, backend="redis")
+                    try:
+                        await client.delete(key)
+                    except Exception as exc:
+                        log.warning("cache_corrupt_delete_failed", key=key, error=str(exc))
+                    return None
             except Exception as exc:
                 log.warning("redis_get_failed", key=key, error=str(exc))
                 self._client = None
@@ -63,10 +75,21 @@ class Cache:
             if expires_at < time.time():
                 self._mem.pop(key, None)
                 return None
-            return json.loads(raw)
+            try:
+                return json.loads(raw)
+            except json.JSONDecodeError:
+                log.warning("cache_corrupt_value", key=key, backend="memory")
+                self._mem.pop(key, None)
+                return None
 
     async def set(self, key: str, value: Any, ttl: int | None = None) -> None:
-        ttl = ttl or self._default_ttl
+        if ttl is None:
+            ttl = self._default_ttl
+        if ttl <= 0:
+            # Negative/zero TTL means "don't retain" — honor by expiring immediately.
+            # We don't have a "delete" verb on this API, so drop in-memory only and
+            # use ex=1 for Redis (a 1-second TTL is the closest portable option).
+            ttl = 1
         raw = json.dumps(value, default=str)
         client = await self._client_or_none()
         if client is not None:
@@ -78,6 +101,10 @@ class Cache:
                 self._client = None
 
         async with self._lock:
+            if ttl == 1:
+                # Match the Redis branch: do not retain in-memory either.
+                self._mem.pop(key, None)
+                return
             self._mem[key] = (time.time() + ttl, raw)
 
     async def close(self) -> None:

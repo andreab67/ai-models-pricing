@@ -160,7 +160,10 @@ def sanity_check(current: dict[str, Any], extracted: KiloExtractedPricing) -> li
         current_plan = current_plans.get(plan.tier)
         if current_plan is None:
             continue
-        for field in _PRICE_FIELDS:
+        # annual_bonus_pct is optional but when present is subject to the same
+        # delta bound as the rest of _PRICE_FIELDS — otherwise a 50% -> 5%
+        # annual-bonus drop would auto-commit without a sanity check.
+        for field in (*_PRICE_FIELDS, "annual_bonus_pct"):
             new_value = getattr(plan, field)
             old_value = current_plan.get(field)
             if new_value is None or old_value in (None, 0):

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from email.message import EmailMessage
 
-import aiosmtplib
+import aiosmtplib  # type: ignore[import-not-found]
 
 from app.config import get_settings
 from app.logging import get_logger
@@ -25,7 +25,7 @@ async def send(subject: str, html: str, text: str) -> None:
     msg.set_content(text)
     msg.add_alternative(html, subtype="html")
 
-    await aiosmtplib.send(
+    await aiosmtplib.send(  # type: ignore[attr-defined]
         msg,
         hostname=_settings.smtp_host,
         port=_settings.smtp_port,

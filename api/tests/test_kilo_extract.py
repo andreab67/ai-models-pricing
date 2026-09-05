@@ -108,6 +108,19 @@ def test_sanity_check_allows_price_delta_within_threshold() -> None:
     assert kilo_extract.sanity_check(_current(), extracted) == []
 
 
+def test_sanity_check_rejects_annual_bonus_delta_above_threshold() -> None:
+    """Regression for finding BCK-002: a 0.50 -> 0.05 annual-bonus drop must
+    fail the sanity delta check, not just the [0,1] range guard."""
+    extracted = _extracted(starter={"annual_bonus_pct": 0.05})  # -90% move
+    problems = kilo_extract.sanity_check(_current(), extracted)
+    assert any("annual_bonus_pct moved" in p for p in problems), problems
+
+
+def test_sanity_check_allows_annual_bonus_delta_within_threshold() -> None:
+    extracted = _extracted(starter={"annual_bonus_pct": 0.55})  # +10% move, under 50% default
+    assert kilo_extract.sanity_check(_current(), extracted) == []
+
+
 def test_diff_from_current_returns_none_when_unchanged() -> None:
     assert kilo_extract.diff_from_current(_current(), _extracted()) is None
 
