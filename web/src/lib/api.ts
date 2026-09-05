@@ -197,7 +197,7 @@ export function fmtCtx(tokens: number | null | undefined): string {
 // componentStack) never leak into user-visible red text.
 export function errMsg(error: unknown): string {
   if (error == null) return "Unknown error";
-  if (typeof error === "string") return error;
+  if (typeof error === "string") return error || "Request failed";
   if (error instanceof Error) return error.message;
   if (typeof error === "object") {
     const e = error as { message?: unknown; statusText?: unknown };

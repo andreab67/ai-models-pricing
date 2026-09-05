@@ -38,6 +38,28 @@ CACHE_KEY = "openrouter:models:normalized"
 _SPEED_CONCURRENCY = 8
 
 
+# Allowlist of hosts we will attach the OpenRouter bearer token to. This blocks
+# SSRF-via-catalog: if a model's `links.details` URL is hijacked to an
+# attacker-controlled host, we refuse to send the Authorization header there.
+# Only paths under the public models endpoints are allowed — the catalog's
+# `links.details` always points at /api/v1/models/..., so restricting the path
+# prefix means a hijacked catalog cannot redirect the bearer to e.g.
+# /account/transfer-credits.
+_ALLOWED_DETAIL_HOSTS = frozenset({"openrouter.ai"})
+_ALLOWED_DETAIL_PATH_PREFIXES: tuple[str, ...] = ("/api/v1/models/",)
+
+
+def _is_allowed_detail_url(url: str) -> bool:
+    parts = urlsplit(url)
+    if parts.scheme not in ("http", "https"):
+        return False
+    host = parts.hostname or ""
+    if not any(host == h or host.endswith(f".{h}") for h in _ALLOWED_DETAIL_HOSTS):
+        return False
+    path = parts.path or ""
+    return any(path.startswith(p) for p in _ALLOWED_DETAIL_PATH_PREFIXES)
+
+
 def _auth_headers() -> dict[str, str]:
     """Authorization header for OpenRouter. Required for speed stats."""
     key = _settings.openrouter_api_key
@@ -195,31 +217,6 @@ async def enrich_speeds(
 
     enriched = sum(1 for m in normalized if m.throughput_tps is not None)
     log.info("openrouter_speed_enrich_ok", enriched=enriched, total=len(normalized))
-
-
-# Allowlist of hosts we will attach the OpenRouter bearer token to. This blocks
-# SSRF-via-catalog: if a model's `links.details` URL is hijacked to an
-# attacker-controlled host, we refuse to send the Authorization header there.
-_ALLOWED_DETAIL_HOSTS = frozenset({"openrouter.ai"})
-
-# Only paths under the public models endpoints are allowed. The OpenRouter
-# catalog's `links.details` values always point at model detail pages under
-# /api/v1/models/, so restricting to that prefix means a hijacked catalog
-# cannot redirect the bearer to e.g. /account/transfer-credits.
-_ALLOWED_DETAIL_PATH_PREFIXES: tuple[str, ...] = (
-    "/api/v1/models/",
-)
-
-
-def _is_allowed_detail_url(url: str) -> bool:
-    parts = urlsplit(url)
-    if parts.scheme not in ("http", "https"):
-        return False
-    host = parts.hostname or ""
-    if not any(host == h or host.endswith(f".{h}") for h in _ALLOWED_DETAIL_HOSTS):
-        return False
-    path = parts.path or ""
-    return any(path.startswith(p) for p in _ALLOWED_DETAIL_PATH_PREFIXES)
 
 
 async def refresh_pricing(
