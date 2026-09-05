@@ -165,6 +165,7 @@ export function useActivity() {
 }
 
 export function fmtUsd(n: number): string {
+  if (!Number.isFinite(n)) return "—";
   if (n === 0) return "$0";
   if (n < 0.01) return `$${n.toFixed(4)}`;
   if (n < 1) return `$${n.toFixed(3)}`;
@@ -172,12 +173,39 @@ export function fmtUsd(n: number): string {
 }
 
 export function fmtSpeed(n: number | null | undefined): string {
-  return n ? `${Math.round(n)} tok/s` : "—";
+  if (n == null || !Number.isFinite(n)) return "—";
+  return `${Math.round(n)} tok/s`;
 }
 
 export function fmtLatency(ms: number | null | undefined): string {
-  if (!ms) return "—";
+  if (ms == null || !Number.isFinite(ms)) return "—";
   return ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${Math.round(ms)}ms`;
+}
+
+// Compact context-window formatter (1k / 1M suffix).
+export function fmtCtx(tokens: number | null | undefined): string {
+  if (tokens == null) return "—";
+  if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(0)}M`;
+  if (tokens >= 1_000) return `${(tokens / 1_000).toFixed(0)}k`;
+  return String(tokens);
+}
+
+// Shared error formatter — keeps the three error surfaces (ModelTable,
+// TopTenRanking, AccountBalances) consistent regardless of whether the
+// thrown value is an Error, a string, or an arbitrary object.
+export function errMsg(error: unknown): string {
+  if (error == null) return "Unknown error";
+  if (typeof error === "string") return error;
+  if (error instanceof Error) return error.message;
+  if (typeof error === "object" && "message" in error) {
+    const m = (error as { message: unknown }).message;
+    if (typeof m === "string") return m;
+  }
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return String(error);
+  }
 }
 
 // ---------------------------------------------------------------------------

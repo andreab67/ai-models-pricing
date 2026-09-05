@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 
-import { fmtSpeed, fmtUsd, useModels, type ModelPricing } from "@/lib/api";
+import { errMsg, fmtSpeed, fmtUsd, useModels, type ModelPricing } from "@/lib/api";
 
 type SortKey =
   | "name"
@@ -94,7 +94,7 @@ export function ModelTable({ onSelect }: Props) {
         </div>
       </div>
       {isLoading && <p className="text-sm opacity-60">Loading…</p>}
-      {error && <p className="text-sm text-red-500">Failed: {String(error)}</p>}
+      {error && <p className="text-sm text-red-500">Failed: {errMsg(error)}</p>}
       {!isLoading && data && (
         <div>
           <div className="overflow-x-auto">

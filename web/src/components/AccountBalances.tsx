@@ -1,9 +1,15 @@
 "use client";
 
-import { useAccountUsage, useActivity, fmtUsd, type AccountProviderUsage } from "@/lib/api";
+import {
+  errMsg,
+  useAccountUsage,
+  useActivity,
+  fmtUsd,
+  type AccountProviderUsage,
+} from "@/lib/api";
 
 function OpenRouterCard({ account }: { account: AccountProviderUsage }) {
-  const { data: activityData } = useActivity();
+  const { data: activityData, error: activityError } = useActivity();
 
   const usedPct =
     account.limit_usd && account.spent_usd != null
@@ -86,7 +92,11 @@ function OpenRouterCard({ account }: { account: AccountProviderUsage }) {
               )}
             </div>
 
-            {!activityData ? (
+            {activityError ? (
+              <p className="text-xs text-red-400">
+                Activity: {errMsg(activityError)}
+              </p>
+            ) : !activityData ? (
               <p className="text-xs text-muted">Loading…</p>
             ) : activityData.items.length === 0 ? (
               <p className="text-xs text-muted/60">
@@ -151,7 +161,9 @@ export function AccountBalances() {
       </h2>
 
       {isLoading && <p className="text-sm text-muted">Loading account data…</p>}
-      {error && <p className="text-sm text-red-400">Failed to load: {error.message}</p>}
+      {error && (
+        <p className="text-sm text-red-400">Failed to load: {errMsg(error)}</p>
+      )}
       {data && <OpenRouterCard account={data.openrouter} />}
     </div>
   );

@@ -1,13 +1,6 @@
 "use client";
 
-import { fmtSpeed, fmtUsd, useTopModels } from "@/lib/api";
-
-function fmtCtx(tokens: number | null | undefined): string {
-  if (!tokens) return "—";
-  if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(0)}M`;
-  if (tokens >= 1_000) return `${(tokens / 1_000).toFixed(0)}k`;
-  return String(tokens);
-}
+import { errMsg, fmtCtx, fmtSpeed, fmtUsd, useTopModels } from "@/lib/api";
 
 interface Props {
   onSelect: (modelId: string) => void;
@@ -23,7 +16,7 @@ export function TopTenRanking({ onSelect }: Props) {
         Ranked by blended cost (30% input / 70% output) · tool calling support · ≥1M tokens context window
       </p>
       {isLoading && <p className="text-sm opacity-60">Loading…</p>}
-      {error && <p className="text-sm text-red-500">Failed to load: {String(error)}</p>}
+      {error && <p className="text-sm text-red-500">Failed to load: {errMsg(error)}</p>}
       {data && (
         <div className="w-full overflow-x-auto">
           <table className="w-full text-sm">
@@ -61,9 +54,11 @@ export function TopTenRanking({ onSelect }: Props) {
                   <td className="py-2 text-right pr-4 font-mono text-xs opacity-70">
                     {fmtUsd(r.model.completion_usd_per_mtok)}
                   </td>
-                  <td className="py-2 text-right pr-4 font-mono text-xs opacity-70">
-                    {r.model.max_completion_tokens ? fmtCtx(r.model.max_completion_tokens) : "—"}
-                  </td>
+<td className="py-2 text-right pr-4 font-mono text-xs opacity-70">
+                        {r.model.max_completion_tokens == null
+                          ? "—"
+                          : fmtCtx(r.model.max_completion_tokens)}
+                      </td>
                   <td className="py-2 text-center pr-4">
                     <span aria-label={r.model.supports_vision ? "Vision supported" : "No vision"}>
                       {r.model.supports_vision ? "✓" : "—"}

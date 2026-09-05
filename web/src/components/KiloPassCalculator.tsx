@@ -1,24 +1,13 @@
 "use client";
 
-import { useKiloProjection } from "@/lib/api";
+import { useState } from "react";
 
-interface Props {
-  tier: string;
-  setTier: (t: string) => void;
-  streakMonths: number;
-  setStreakMonths: (n: number) => void;
-  annual: boolean;
-  setAnnual: (a: boolean) => void;
-}
+import { errMsg, useKiloProjection } from "@/lib/api";
 
-export function KiloPassCalculator({
-  tier,
-  setTier,
-  streakMonths,
-  setStreakMonths,
-  annual,
-  setAnnual,
-}: Props) {
+export function KiloPassCalculator() {
+  const [tier, setTier] = useState("pro");
+  const [streakMonths, setStreakMonths] = useState(8);
+  const [annual, setAnnual] = useState(false);
   const { data, isLoading, error } = useKiloProjection(tier, streakMonths, annual);
 
   const selectCls =
@@ -67,7 +56,9 @@ export function KiloPassCalculator({
 
       <div className="mt-3 text-sm">
         {isLoading && <span className="opacity-60">Loading…</span>}
-        {error && <span className="text-red-500">Error: {String(error)}</span>}
+        {error && (
+          <span className="text-red-500">Error: {errMsg(error)}</span>
+        )}
         {data && (
           <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
             <Stat label="Paid credits" value={`$${data.paid_credits_usd.toFixed(2)}`} />
