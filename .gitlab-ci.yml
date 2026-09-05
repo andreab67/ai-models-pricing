@@ -176,7 +176,7 @@ deploy:k8s:
     - kubectl rollout status deployment/web -n model-pricing --timeout=120s
     - web_rc=$?
     - set -e
-    - if [ "$ api_rc" -ne 0 ] || [ "$web_rc" -ne 0 ]; then
+    - if [ "$api_rc" -ne 0 ] || [ "$web_rc" -ne 0 ]; then
     -     echo "Rollout failed; reverting to previous revision"
     -     kubectl rollout undo deployment/api -n model-pricing || true
     -     kubectl rollout undo deployment/web -n model-pricing || true

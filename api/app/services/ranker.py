@@ -40,19 +40,18 @@ def top_n(models: list[ModelPricing], n: int | None = None) -> list[RankedModel]
     if not eligible:
         return []
     scored = sorted(eligible, key=_blended)
-    # Pick a normalizing anchor: the median blended cost of the eligible set.
-    # This keeps the displayed score informative across price regimes instead of
-    # saturating to 0 for any model priced above $100/Mtok blended.
-    median_blended = _blended(scored[len(scored) // 2])
+    # Anchor to the cheapest (sorted-ascending first element). Best in cohort
+    # is always 100; worse models score lower (no fixed-50 bias on the median,
+    # no special case for N=1 — a single-eligible model is its own anchor
+    # and scores 100).
+    min_blended = _blended(scored[0])
     ranked = []
     for i, m in enumerate(scored[:n], start=1):
         blended = _blended(m)
-        # Higher = better. 2 * median as the anchor: best in cohort ~ 100,
-        # worst in cohort ~ -100, capped at 0 (still preserves order).
-        if median_blended > 0:
-            score = max(0.0, 100.0 * (1.0 - blended / (2.0 * median_blended)))
-        else:
+        if min_blended <= 0 or blended <= 0:
             score = 100.0
+        else:
+            score = max(0.0, 100.0 * min_blended / blended)
         ranked.append(
             RankedModel(
                 model=m,

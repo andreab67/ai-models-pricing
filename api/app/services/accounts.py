@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import math
 from datetime import UTC, datetime
 
 import httpx
@@ -18,6 +19,23 @@ _settings = get_settings()
 
 _CACHE_KEY = "accounts:usage"
 _CACHE_TTL = 120  # 2 min — balance data should be fairly fresh
+
+
+def _num(v: object) -> float:
+    """Coerce an OpenRouter /credits response field to a finite float.
+
+    total_credits and total_usage come back as ints/floats/strings depending
+    on account state, and OpenRouter occasionally returns the literals
+    "NaN" / "Infinity" for broken billing periods. Any non-numeric or
+    non-finite value yields 0.0 so the JSON we return stays valid and the
+    frontend doesn't have to special-case missing balances.
+    """
+    try:
+        # `object` is too wide for float(); we want runtime coercion.
+        n = float(v) if v is not None else 0.0  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return 0.0
+    return n if math.isfinite(n) else 0.0
 
 
 async def _check_openrouter() -> AccountProviderUsage:
@@ -38,16 +56,9 @@ async def _check_openrouter() -> AccountProviderUsage:
             resp.raise_for_status()
             data = resp.json().get("data", {})
 
-            # total_credits and total_usage are both in USD; coerce carefully
-            # because OpenRouter may return ints/floats/strings depending on
-            # the account state, and any non-numeric value should yield 0.
-            def _num(v: object) -> float:
-                try:
-                    # `object` is too wide for float(); we want runtime coercion.
-                    return float(v) if v is not None else 0.0  # type: ignore[arg-type]
-                except (TypeError, ValueError):
-                    return 0.0
-
+            # total_credits and total_usage are both in USD; coerce safely.
+            # OpenRouter may return ints/floats/strings; non-finite
+            # values ("NaN", "Infinity") get coerced to 0.0 by _num().
             total_credits = _num(data.get("total_credits"))
             total_usage = _num(data.get("total_usage"))
             remaining = total_credits - total_usage

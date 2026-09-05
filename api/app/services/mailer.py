@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from email.message import EmailMessage
 
+# aiosmtplib ships no type stubs; the import-not-found is unavoidable.
 import aiosmtplib  # type: ignore[import-not-found]
 
 from app.config import get_settings

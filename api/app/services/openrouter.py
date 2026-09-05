@@ -202,13 +202,24 @@ async def enrich_speeds(
 # attacker-controlled host, we refuse to send the Authorization header there.
 _ALLOWED_DETAIL_HOSTS = frozenset({"openrouter.ai"})
 
+# Only paths under the public models endpoints are allowed. The OpenRouter
+# catalog's `links.details` values always point at model detail pages under
+# /api/v1/models/, so restricting to that prefix means a hijacked catalog
+# cannot redirect the bearer to e.g. /account/transfer-credits.
+_ALLOWED_DETAIL_PATH_PREFIXES: tuple[str, ...] = (
+    "/api/v1/models/",
+)
+
 
 def _is_allowed_detail_url(url: str) -> bool:
     parts = urlsplit(url)
     if parts.scheme not in ("http", "https"):
         return False
     host = parts.hostname or ""
-    return any(host == h or host.endswith(f".{h}") for h in _ALLOWED_DETAIL_HOSTS)
+    if not any(host == h or host.endswith(f".{h}") for h in _ALLOWED_DETAIL_HOSTS):
+        return False
+    path = parts.path or ""
+    return any(path.startswith(p) for p in _ALLOWED_DETAIL_PATH_PREFIXES)
 
 
 async def refresh_pricing(

@@ -92,13 +92,15 @@ function OpenRouterCard({ account }: { account: AccountProviderUsage }) {
               )}
             </div>
 
-            {activityError ? (
+            {activityError && (
               <p className="text-xs text-red-400">
                 Activity: {errMsg(activityError)}
               </p>
-            ) : !activityData ? (
+            )}
+            {!activityData && !activityError && (
               <p className="text-xs text-muted">Loading…</p>
-            ) : activityData.items.length === 0 ? (
+            )}
+            {activityData && activityData.items.length === 0 && (
               <p className="text-xs text-muted/60">
                 Requires OpenRouter management key —{" "}
                 <a
@@ -111,7 +113,8 @@ function OpenRouterCard({ account }: { account: AccountProviderUsage }) {
                 </a>
                 {" "}and set OPENROUTER_ADMIN_KEY in cluster secret
               </p>
-            ) : (
+            )}
+            {activityData && activityData.items.length > 0 && (
               <table className="w-full text-xs">
                 <thead>
                   <tr className="text-muted border-b border-border">

@@ -178,19 +178,16 @@ See `FUNCTIONAL.md` for complete endpoint documentation and response schemas.
 ### Deploy
 
 ```bash
-# 1. Build and push images
+# 1. Build and push images (CI does this automatically on push to main)
 docker build -t <registry>/api:latest api/
 docker build -t <registry>/web:latest web/
 docker push <registry>/api:latest
 docker push <registry>/web:latest
 
-# 2. Update image references in k8s/base/deployment.yaml
-
-# 3. Deploy
-kubectl create namespace model-pricing
+# 2. Deploy (CI does this automatically via deploy:k8s on push to main)
 kubectl apply -k k8s/overlays/prod
 
-# 4. Verify
+# 3. Verify
 kubectl -n model-pricing get pods,svc,ingress
 kubectl -n model-pricing logs deploy/api -f
 ```

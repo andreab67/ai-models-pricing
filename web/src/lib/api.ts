@@ -192,20 +192,19 @@ export function fmtCtx(tokens: number | null | undefined): string {
 
 // Shared error formatter — keeps the three error surfaces (ModelTable,
 // TopTenRanking, AccountBalances) consistent regardless of whether the
-// thrown value is an Error, a string, or an arbitrary object.
+// thrown value is an Error, a string, or an arbitrary object. Deliberately
+// avoids JSON.stringify on raw objects so React internals (digest, stack,
+// componentStack) never leak into user-visible red text.
 export function errMsg(error: unknown): string {
   if (error == null) return "Unknown error";
   if (typeof error === "string") return error;
   if (error instanceof Error) return error.message;
-  if (typeof error === "object" && "message" in error) {
-    const m = (error as { message: unknown }).message;
-    if (typeof m === "string") return m;
+  if (typeof error === "object") {
+    const e = error as { message?: unknown; statusText?: unknown };
+    if (typeof e.message === "string") return e.message;
+    if (typeof e.statusText === "string") return e.statusText;
   }
-  try {
-    return JSON.stringify(error);
-  } catch {
-    return String(error);
-  }
+  return "Request failed";
 }
 
 // ---------------------------------------------------------------------------

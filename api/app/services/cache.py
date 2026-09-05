@@ -83,25 +83,27 @@ class Cache:
                 return None
 
     async def set(self, key: str, value: Any, ttl: int | None = None) -> None:
-        if ttl is None:
+        no_retain = ttl is not None and ttl <= 0
+        if ttl is None or ttl <= 0:
             ttl = self._default_ttl
-        if ttl <= 0:
-            # Negative/zero TTL means "don't retain" — honor by expiring immediately.
-            # We don't have a "delete" verb on this API, so drop in-memory only and
-            # use ex=1 for Redis (a 1-second TTL is the closest portable option).
-            ttl = 1
         raw = json.dumps(value, default=str)
         client = await self._client_or_none()
         if client is not None:
             try:
-                await client.set(key, raw, ex=ttl)
+                if no_retain:
+                    # Caller asked to not retain — delete any existing entry
+                    # rather than writing a short-lived tombstone that a
+                    # subsequent get() could read back within the window.
+                    await client.delete(key)
+                else:
+                    await client.set(key, raw, ex=ttl)
                 return
             except Exception as exc:
                 log.warning("redis_set_failed", key=key, error=str(exc))
                 self._client = None
 
         async with self._lock:
-            if ttl == 1:
+            if no_retain:
                 # Match the Redis branch: do not retain in-memory either.
                 self._mem.pop(key, None)
                 return
