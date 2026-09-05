@@ -24,12 +24,15 @@ lint:web:
     - merge_requests
     - main
 
-scan:api-trivy:
+scan:api-base-trivy:
   stage: sast
   image:
     name: aquasec/trivy:latest
     entrypoint: [""]
   script:
+    # Job name explicitly says "base" — it scans the upstream base image
+    # (python:3.14-slim), NOT the kaniko-built api image. The built image
+    # is scanned by `scan:api-image-trivy` once `build:api` completes.
     - trivy image --severity HIGH,CRITICAL --exit-code 0 --no-progress --format json --output api-scan.json python:3.14-slim
     - trivy image --severity HIGH,CRITICAL --exit-code 0 --no-progress --format sarif --output api-scan.sarif python:3.14-slim
     - echo "API base image scanned"
@@ -44,12 +47,15 @@ scan:api-trivy:
     - merge_requests
     - main
 
-scan:web-trivy:
+scan:web-base-trivy:
   stage: sast
   image:
     name: aquasec/trivy:latest
     entrypoint: [""]
   script:
+    # Job name explicitly says "base" — scans upstream node:22-alpine, NOT
+    # the kaniko-built web image. The built image is scanned by
+    # `scan:web-image-trivy` once `build:web` completes.
     - trivy image --severity HIGH,CRITICAL --exit-code 0 --no-progress --format json --output web-scan.json node:22-alpine
     - trivy image --severity HIGH,CRITICAL --exit-code 0 --no-progress --format sarif --output web-scan.sarif node:22-alpine
     - echo "Web base image scanned"
@@ -142,12 +148,20 @@ test:db-migrations:
 # initContainers by name. The init step is idempotent (no-op when already at
 # head) and ordered before the app, so the rollout's readiness gate guarantees
 # the schema is current before traffic shifts.
+#
+# Manual gate: this job only runs when an operator clicks "Run" in the
+# GitLab pipeline UI. The `environment: production` block makes the
+# production context visible alongside the job.
 deploy:k8s:
   stage: deploy
   image:
     name: bitnami/kubectl:latest
     entrypoint: [""]
   needs: [build:api, build:web]
+  environment:
+    name: production
+    url: https://models.cloudreviewer.net
+  when: manual
   script:
     - echo "${KUBE_CONFIG}" | base64 -d > /tmp/kubeconfig
     - export KUBECONFIG=/tmp/kubeconfig
@@ -156,7 +170,17 @@ deploy:k8s:
     - kubectl set image cronjob/refresh-pricing refresh=${IMAGE_API}:${CI_COMMIT_SHORT_SHA} -n model-pricing
     - kubectl set image cronjob/daily-report report=${IMAGE_API}:${CI_COMMIT_SHORT_SHA} -n model-pricing
     - kubectl set image cronjob/kilo-diff diff=${IMAGE_API}:${CI_COMMIT_SHORT_SHA} -n model-pricing
+    - set +e
     - kubectl rollout status deployment/api -n model-pricing --timeout=120s
+    - api_rc=$?
     - kubectl rollout status deployment/web -n model-pricing --timeout=120s
+    - web_rc=$?
+    - set -e
+    - if [ "$api_rc" -ne 0 ] || [ "$web_rc" -ne 0 ]; then
+    -     echo "Rollout failed; reverting to previous revision"
+    -     kubectl rollout undo deployment/api -n model-pricing || true
+    -     kubectl rollout undo deployment/web -n model-pricing || true
+    -     exit 1
+    - fi
   only:
     - main

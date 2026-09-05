@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import math
 from datetime import UTC, datetime
 
 import httpx
@@ -18,6 +19,23 @@ _settings = get_settings()
 
 _CACHE_KEY = "accounts:usage"
 _CACHE_TTL = 120  # 2 min — balance data should be fairly fresh
+
+
+def _num(v: object) -> float:
+    """Coerce an OpenRouter /credits response field to a finite float.
+
+    total_credits and total_usage come back as ints/floats/strings depending
+    on account state, and OpenRouter occasionally returns the literals
+    "NaN" / "Infinity" for broken billing periods. Any non-numeric or
+    non-finite value yields 0.0 so the JSON we return stays valid and the
+    frontend doesn't have to special-case missing balances.
+    """
+    try:
+        # `object` is too wide for float(); we want runtime coercion.
+        n = float(v) if v is not None else 0.0  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return 0.0
+    return n if math.isfinite(n) else 0.0
 
 
 async def _check_openrouter() -> AccountProviderUsage:
@@ -38,9 +56,11 @@ async def _check_openrouter() -> AccountProviderUsage:
             resp.raise_for_status()
             data = resp.json().get("data", {})
 
-            # total_credits and total_usage are both in USD
-            total_credits = float(data.get("total_credits") or 0)
-            total_usage = float(data.get("total_usage") or 0)
+            # total_credits and total_usage are both in USD; coerce safely.
+            # OpenRouter may return ints/floats/strings; non-finite
+            # values ("NaN", "Infinity") get coerced to 0.0 by _num().
+            total_credits = _num(data.get("total_credits"))
+            total_usage = _num(data.get("total_usage"))
             remaining = total_credits - total_usage
 
             return AccountProviderUsage(
@@ -117,7 +137,8 @@ _ACTIVITY_CACHE_TTL = 900  # 15 min
 def _to_int(v: object) -> int:
     """Analytics query returns counts/tokens as strings; coerce safely."""
     try:
-        return int(float(v)) if v is not None else 0
+        # `object` is too wide for int()/float(); we want runtime coercion.
+        return int(float(v)) if v is not None else 0  # type: ignore[arg-type]
     except (TypeError, ValueError):
         return 0
 
@@ -155,17 +176,22 @@ async def get_activity() -> ActivityResponse:
             # Shape: {"data": {"data": [{model, request_count, total_usage,
             #   tokens_prompt, tokens_completion}, ...], "metadata": {...}}}
             rows = (resp.json().get("data") or {}).get("data") or []
-            items = [
-                ModelActivityItem(
-                    model_id=model_id,
-                    requests=_to_int(r.get("request_count")),
-                    prompt_tokens=_to_int(r.get("tokens_prompt")),
-                    completion_tokens=_to_int(r.get("tokens_completion")),
-                    cost_usd=round(float(r.get("total_usage") or 0), 6),
+            items = []
+            for r in rows:
+                if not isinstance(r, dict):
+                    continue
+                model_id = r.get("model")
+                if not isinstance(model_id, str):
+                    continue
+                items.append(
+                    ModelActivityItem(
+                        model_id=model_id,
+                        requests=_to_int(r.get("request_count")),
+                        prompt_tokens=_to_int(r.get("tokens_prompt")),
+                        completion_tokens=_to_int(r.get("tokens_completion")),
+                        cost_usd=round(float(r.get("total_usage") or 0), 6),
+                    )
                 )
-                for r in rows
-                if (model_id := r.get("model"))
-            ]
             items.sort(key=lambda x: x.cost_usd, reverse=True)
             result = ActivityResponse(items=items, fetched_at=datetime.now(UTC))
         except Exception as exc:

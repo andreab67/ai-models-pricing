@@ -75,7 +75,8 @@ This dashboard solves all of these problems by:
 
 - **Production Infrastructure**
   - Kubernetes-ready with health checks and metrics
-  - Horizontal scaling (2–3 replicas per service)
+  - Single replica per service by default (see `k8s/base/api-deployment.yaml` for the
+    single-replica tradeoff and the PodDisruptionBudget intent comment)
   - Automated pricing refresh every 15 minutes
   - Configurable daily report emails
 
@@ -177,35 +178,36 @@ See `FUNCTIONAL.md` for complete endpoint documentation and response schemas.
 ### Deploy
 
 ```bash
-# 1. Build and push images
+# 1. Build and push images (CI does this automatically on push to main)
 docker build -t <registry>/api:latest api/
 docker build -t <registry>/web:latest web/
 docker push <registry>/api:latest
 docker push <registry>/web:latest
 
-# 2. Update image references in k8s/base/deployment.yaml
-
-# 3. Deploy
-kubectl create namespace model-pricing
+# 2. Deploy (CI does this automatically via deploy:k8s on push to main)
 kubectl apply -k k8s/overlays/prod
 
-# 4. Verify
+# 3. Verify
 kubectl -n model-pricing get pods,svc,ingress
 kubectl -n model-pricing logs deploy/api -f
 ```
 
 **Configure TLS:**
 ```bash
-# Update domain in k8s/certificate.yaml, then apply
-kubectl apply -f k8s/certificate.yaml
+# TLS is provisioned via cert-manager against the existing `models-tls`
+# secret that the base Ingress (k8s/base/ingress.yaml) already references.
+# No manual Certificate apply is needed if cert-manager + a ClusterIssuer
+# named `letsencrypt-prod` are installed in the cluster; otherwise create
+# a Certificate manifest at k8s/overlays/prod/certificate.yaml referencing
+# the cluster issuer, then `kubectl apply -f k8s/overlays/prod/certificate.yaml`.
 ```
 
 ## Architecture
 
 ```text
 Ingress (TLS) → Load Balancer
-    ├─ /         → Next.js (web, replicas=2–3)
-    └─ /api/*    → FastAPI (api, replicas=2–3)
+    ├─ /         → Next.js (web, replicas=1 by default)
+    └─ /api/*    → FastAPI (api, replicas=1 by default)
           ├─ Postgres (history, model catalog)
           ├─ Redis (900s TTL cache)
           └─ External APIs
@@ -302,7 +304,8 @@ Extend `api/app/jobs/daily_report.py` with:
 - **Response times**: <100ms (cached) / <500ms (history queries)
 - **Throughput**: 1000+ req/s per pod
 - **Memory**: ~300MB API, ~200MB web per pod
-- **Scaling**: Horizontal scaling with 2–3 replicas
+- **Scaling**: Single replica per service by default; bump `replicas` in
+  `k8s/base/api-deployment.yaml` and `web-deployment.yaml` when needed.
 - **Cold start**: ~2 seconds per pod
 
 ## Dependencies

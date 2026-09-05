@@ -37,12 +37,21 @@ def _eligible(model: ModelPricing) -> bool:
 def top_n(models: list[ModelPricing], n: int | None = None) -> list[RankedModel]:
     n = n or _settings.rank_top_n
     eligible = [m for m in models if _eligible(m)]
+    if not eligible:
+        return []
     scored = sorted(eligible, key=_blended)
+    # Anchor to the cheapest (sorted-ascending first element). Best in cohort
+    # is always 100; worse models score lower (no fixed-50 bias on the median,
+    # no special case for N=1 — a single-eligible model is its own anchor
+    # and scores 100).
+    min_blended = _blended(scored[0])
     ranked = []
     for i, m in enumerate(scored[:n], start=1):
         blended = _blended(m)
-        # invert cost into a 0..100 score so higher = better
-        score = max(0.0, 100.0 - blended)
+        if min_blended <= 0 or blended <= 0:
+            score = 100.0
+        else:
+            score = max(0.0, 100.0 * min_blended / blended)
         ranked.append(
             RankedModel(
                 model=m,

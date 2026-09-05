@@ -27,9 +27,12 @@ spec:
           image: gitlab.andrea-house.com:5050/root/model-pricing/api:latest
           command: ["alembic", "upgrade", "head"]
           envFrom:
-            - configMapRef: { name: sr-models-config }
-            - secretRef:    { name: sr-models-secrets }
+            - configMapRef: { name: model-pricing-config }
+            - secretRef:    { name: model-pricing-secrets }
             - secretRef:    { name: ses-creds }
+          resources:
+            requests: { cpu: 50m, memory: 128Mi }
+            limits:   { cpu: 500m, memory: 384Mi }
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
@@ -41,8 +44,8 @@ spec:
           ports:
             - { containerPort: 8000, name: http }
           envFrom:
-            - configMapRef: { name: sr-models-config }
-            - secretRef:    { name: sr-models-secrets }
+            - configMapRef: { name: model-pricing-config }
+            - secretRef:    { name: model-pricing-secrets }
             - secretRef:    { name: ses-creds }
           resources:
             requests: { cpu: 100m, memory: 192Mi }
@@ -72,6 +75,11 @@ kind: PodDisruptionBudget
 metadata:
   name: api
 spec:
+  # Intentional no-op: single-replica Deployment. A PDB with minAvailable>=1
+  # would block all voluntary disruptions; setting it to 0 means the PDB
+  # exists (so the resource is tracked) but imposes no constraint. Bumping
+  # replicas to 2+ AND changing this to maxUnavailable: 0 is the right next
+  # step once we move off the single-replica constraint (see INF-020).
   minAvailable: 0
   selector:
     matchLabels: { app: api }

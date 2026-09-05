@@ -38,6 +38,28 @@ CACHE_KEY = "openrouter:models:normalized"
 _SPEED_CONCURRENCY = 8
 
 
+# Allowlist of hosts we will attach the OpenRouter bearer token to. This blocks
+# SSRF-via-catalog: if a model's `links.details` URL is hijacked to an
+# attacker-controlled host, we refuse to send the Authorization header there.
+# Only paths under the public models endpoints are allowed — the catalog's
+# `links.details` always points at /api/v1/models/..., so restricting the path
+# prefix means a hijacked catalog cannot redirect the bearer to e.g.
+# /account/transfer-credits.
+_ALLOWED_DETAIL_HOSTS = frozenset({"openrouter.ai"})
+_ALLOWED_DETAIL_PATH_PREFIXES: tuple[str, ...] = ("/api/v1/models/",)
+
+
+def _is_allowed_detail_url(url: str) -> bool:
+    parts = urlsplit(url)
+    if parts.scheme not in ("http", "https"):
+        return False
+    host = parts.hostname or ""
+    if not any(host == h or host.endswith(f".{h}") for h in _ALLOWED_DETAIL_HOSTS):
+        return False
+    path = parts.path or ""
+    return any(path.startswith(p) for p in _ALLOWED_DETAIL_PATH_PREFIXES)
+
+
 def _auth_headers() -> dict[str, str]:
     """Authorization header for OpenRouter. Required for speed stats."""
     key = _settings.openrouter_api_key
@@ -164,6 +186,15 @@ async def enrich_speeds(
             if not model_id or not details:
                 return
             url = f"{host_root}{details}" if details.startswith("/") else details
+            # Guard: never attach the bearer token to a host outside the allowlist.
+            # Both the prefix-join case (URL inherits host_root) and the absolute-URL
+            # case are checked against the same set so a hijacked catalog can't
+            # exfiltrate the OpenRouter API key.
+            if not _is_allowed_detail_url(url):
+                log.warning(
+                    "openrouter_speed_url_rejected", model=model_id, url=url,
+                )
+                return
             async with sem:
                 try:
                     resp = await client.get(url)

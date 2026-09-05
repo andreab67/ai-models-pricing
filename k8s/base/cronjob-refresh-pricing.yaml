@@ -25,11 +25,11 @@ spec:
           restartPolicy: OnFailure
           containers:
             - name: refresh
-              image: gitlab.cloudreviewer.net:5050/andreab/sr-models/api:latest
+              image: gitlab.andrea-house.com:5050/root/model-pricing/api:latest
               command: ["python", "-m", "app.jobs.refresh_pricing"]
               envFrom:
-                - configMapRef: { name: sr-models-config }
-                - secretRef:    { name: sr-models-secrets }
+                - configMapRef: { name: model-pricing-config }
+                - secretRef:    { name: model-pricing-secrets }
               resources:
                 requests: { cpu: 50m,  memory: 128Mi }
                 limits:   { cpu: 500m, memory: 384Mi }

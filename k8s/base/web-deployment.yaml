@@ -29,7 +29,7 @@ spec:
               value: http://api:8000
             - name: PORT
               value: "3000"
-            - name: HOSTNAME
+            - name: HOST
               value: "0.0.0.0"
           resources:
             requests: { cpu: 50m,  memory: 128Mi }

@@ -105,7 +105,7 @@ export function ModelDetailModal({
   const isFreeModel = chartData.length > 0 && chartData.every((d) => d.input === 0 && d.output === 0);
 
   const fmtTokens = (n: number | null | undefined) =>
-    n ? n.toLocaleString() : "—";
+    n == null ? "—" : n.toLocaleString();
 
   return (
     <div
