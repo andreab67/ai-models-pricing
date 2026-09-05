@@ -45,3 +45,6 @@ build/
 # prevents the nested .gitignore's negation rules from ever taking effect)
 # or be redundant with it (a `.varmem/*` entry decides nothing the nested
 # file doesn't already decide on its own).
+
+# VarAlign local store (machine-local variable-tracking data)
+.varmem/*
