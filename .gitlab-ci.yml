@@ -24,6 +24,28 @@ lint:web:
     - merge_requests
     - main
 
+lint:api:
+  stage: lint
+  image: python:3.14-slim
+  script:
+    - cd api
+    - pip install --no-cache-dir ruff
+    - ruff check app tests
+  only:
+    - merge_requests
+    - main
+
+test:api:
+  stage: test
+  image: python:3.14-slim
+  script:
+    - cd api
+    - pip install --no-cache-dir -e ".[dev]"
+    - pytest tests -q
+  only:
+    - merge_requests
+    - main
+
 scan:api-base-trivy:
   stage: sast
   image:
@@ -153,18 +175,19 @@ test:db-migrations:
 # `environment: production` block makes the production context visible
 # alongside the job.
 #
-# `needs` must list test:db-migrations as well as the two builds. `needs`
+# `needs` must list every `test` stage job as well as the two builds. `needs`
 # overrides stage ordering, so listing only the builds would let the deploy
-# start the moment they finish — racing, and usually beating, the migration
-# check in the earlier `test` stage. That is harmless behind a manual gate
-# (an operator reads the pipeline before clicking) but not on an automatic
-# one, where it would ship a schema change nothing validated.
+# start the moment they finish — racing, and usually beating, the checks in
+# the earlier `test` stage. That is harmless behind a manual gate (an operator
+# reads the pipeline before clicking) but not on an automatic one, where it
+# would ship a schema change, or a failing test suite, that nothing validated.
+# Add any new `test` stage job here too.
 deploy:k8s:
   stage: deploy
   image:
     name: bitnami/kubectl:latest
     entrypoint: [""]
-  needs: [build:api, build:web, test:db-migrations]
+  needs: [build:api, build:web, test:db-migrations, test:api]
   environment:
     name: production
     url: https://models.cloudreviewer.net

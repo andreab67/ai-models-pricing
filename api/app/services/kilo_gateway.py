@@ -103,7 +103,25 @@ async def fetch_models() -> list[ModelPricing]:
             )
             resp.raise_for_status()
             data = resp.json().get("data") or []
-            normalized = [m for r in data if (m := _normalize(r)) is not None]
+            # Per-record isolation: one malformed record must not be reported
+            # as a gateway outage. _normalize assumes a str id and dict-ish
+            # pricing, so schema drift on a single entry would otherwise fall
+            # into the except below and 503 the whole catalog -- mislabeling a
+            # data problem as an availability problem, which is exactly the
+            # conflation this change exists to remove. Mirrors the per-record
+            # guard model-speed already has in _normalize_pricing_api.
+            normalized: list[ModelPricing] = []
+            skipped = 0
+            for r in data:
+                try:
+                    m = _normalize(r)
+                except (TypeError, ValueError, AttributeError):
+                    skipped += 1
+                    continue
+                if m is not None:
+                    normalized.append(m)
+            if skipped:
+                log.warning("kilo_models_records_skipped", skipped=skipped, total=len(data))
             if normalized:
                 await cache.set(
                     CACHE_KEY,

@@ -124,3 +124,23 @@ def test_single_model_route_still_404s_when_kilo_answers_without_it(client: Test
     respx.get(MODELS_URL).mock(return_value=httpx.Response(200, json=_model_payload()))
     resp = client.get("/kilo/models/some/other-model")
     assert resp.status_code == 404
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_one_malformed_record_does_not_503_the_whole_catalog():
+    """Schema drift on a single entry is a data problem, not an outage."""
+    payload = {
+        "data": [
+            {"id": 12345, "pricing": {}},  # non-str id -> _normalize would blow up
+            {
+                "id": "minimax/minimax-m3",
+                "name": "minimax/minimax-m3",
+                "pricing": {"prompt": "0.000001", "completion": "0.000002"},
+                "context_length": 1_000_000,
+            },
+        ]
+    }
+    respx.get(MODELS_URL).mock(return_value=httpx.Response(200, json=payload))
+    models = await kilo_gateway.fetch_models()
+    assert [m.id for m in models] == ["minimax/minimax-m3"]
