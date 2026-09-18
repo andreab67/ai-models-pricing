@@ -105,7 +105,7 @@ async def _check_kilo() -> AccountProviderUsage:
     async with httpx.AsyncClient(timeout=10.0) as client:
         try:
             resp = await client.get(
-                "https://api.kilo.ai/api/gateway/models",
+                f"{_settings.kilo_base_url}/models",
                 headers={"Authorization": f"Bearer {key}"},
             )
             if resp.status_code == 401:

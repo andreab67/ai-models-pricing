@@ -2,7 +2,7 @@
 name = "model-pricing-api"
 version = "1.5.0"
 description = "Token pricing optimizer: OpenRouter vs Kilo Code"
-requires-python = ">=3.12"
+requires-python = ">=3.14"
 dependencies = [
   "fastapi>=0.116.0",
   "starlette>=0.49.1",
@@ -34,7 +34,7 @@ dev = [
 
 [tool.ruff]
 line-length = 100
-target-version = "py312"
+target-version = "py314"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "W", "B", "UP", "ASYNC", "S", "RUF"]
