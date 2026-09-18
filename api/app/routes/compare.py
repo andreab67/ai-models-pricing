@@ -34,12 +34,24 @@ async def list_plans() -> list[KiloPlan]:
 
 @kilo_router.get("/models", response_model=list[ModelPricing])
 async def list_kilo_models() -> list[ModelPricing]:
-    return await kilo_gateway.fetch_models()
+    # 503 rather than an empty 200: this endpoint is model-speed's catalog of
+    # record, and a 200 with [] is indistinguishable from "Kilo genuinely has
+    # no models" -- which is how a Kilo outage silently emptied the candidate
+    # pool instead of raising anything.
+    try:
+        return await kilo_gateway.fetch_models()
+    except kilo_gateway.KiloUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
 @kilo_router.get("/models/{model_id:path}", response_model=ModelPricing)
 async def get_kilo_model(model_id: str) -> ModelPricing:
-    m = await kilo_gateway.get_model(model_id)
+    # Same reason, and a 404 here would be a lie: "Kilo does not carry this
+    # model" is a different claim from "we could not ask Kilo".
+    try:
+        m = await kilo_gateway.get_model(model_id)
+    except kilo_gateway.KiloUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     if m is None:
         raise HTTPException(status_code=404, detail=f"model not available on Kilo: {model_id}")
     return m
