@@ -32,6 +32,12 @@ class Settings(BaseSettings):
 
     # --- kilo -------------------------------------------------------------
     kilo_plans_path: Path = Field(default=Path(__file__).parent / "data" / "kilo_plans.yaml")
+    # Gateway API host. Kilo moved this from api.kilo.ai to api.kilocode.ai after
+    # the Anaconda acquisition; api.kilo.ai now returns a bare edge 403 on every
+    # path, authenticated or not. Settings-backed so a future move is an env var
+    # rather than a redeploy. NOTE: kilo_pricing_url below is the *marketing*
+    # site, which still lives on kilo.ai — the two hosts are not interchangeable.
+    kilo_base_url: str = Field(default="https://api.kilocode.ai/api/gateway")
     kilo_pricing_url: str = Field(default="https://kilo.ai/pricing")
     kilo_diff_user_agent: str = Field(default="model-pricing-bot/0.1 (+andrea-house.com)")
     kilo_extraction_model: str = Field(default="anthropic/claude-haiku-4.5")

@@ -21,7 +21,7 @@ _settings = get_settings()
 
 CACHE_KEY = "kilo:models:normalized"
 _CACHE_TTL = 900  # 15 min
-_BASE_URL = "https://api.kilo.ai/api/gateway"
+_BASE_URL = _settings.kilo_base_url
 
 
 def _to_mtok(per_token: str | float | None) -> float:
