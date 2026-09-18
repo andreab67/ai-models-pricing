@@ -149,19 +149,25 @@ test:db-migrations:
 # head) and ordered before the app, so the rollout's readiness gate guarantees
 # the schema is current before traffic shifts.
 #
-# Manual gate: this job only runs when an operator clicks "Run" in the
-# GitLab pipeline UI. The `environment: production` block makes the
-# production context visible alongside the job.
+# Automatic: every green pipeline on `main` deploys to production. The
+# `environment: production` block makes the production context visible
+# alongside the job.
+#
+# `needs` must list test:db-migrations as well as the two builds. `needs`
+# overrides stage ordering, so listing only the builds would let the deploy
+# start the moment they finish — racing, and usually beating, the migration
+# check in the earlier `test` stage. That is harmless behind a manual gate
+# (an operator reads the pipeline before clicking) but not on an automatic
+# one, where it would ship a schema change nothing validated.
 deploy:k8s:
   stage: deploy
   image:
     name: bitnami/kubectl:latest
     entrypoint: [""]
-  needs: [build:api, build:web]
+  needs: [build:api, build:web, test:db-migrations]
   environment:
     name: production
     url: https://models.cloudreviewer.net
-  when: manual
   script:
     - echo "${KUBE_CONFIG}" | base64 -d > /tmp/kubeconfig
     - export KUBECONFIG=/tmp/kubeconfig
