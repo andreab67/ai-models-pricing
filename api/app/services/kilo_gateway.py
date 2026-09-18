@@ -24,6 +24,17 @@ _CACHE_TTL = 900  # 15 min
 _BASE_URL = _settings.kilo_base_url
 
 
+class KiloUnavailable(RuntimeError):
+    """Kilo's gateway could not be reached or returned an error.
+
+    Distinct from "Kilo returned an empty catalog", which is a valid (if odd)
+    answer. Returning [] for both is what let a multi-hour Kilo outage on
+    2026-09-18 read as a successful fetch of zero models all the way through
+    model-speed's catalog-of-record, silently reducing its candidate pool to
+    OpenRouter-only with nothing logged above INFO.
+    """
+
+
 def _to_mtok(per_token: str | float | None) -> float:
     """Convert per-token decimal string to USD per 1M tokens."""
     if per_token is None or per_token == "":
@@ -68,9 +79,16 @@ def _normalize(raw: dict[str, Any]) -> ModelPricing | None:
 
 
 async def fetch_models() -> list[ModelPricing]:
-    """Return Kilo's model catalog. Empty list if key not configured or fetch fails."""
+    """Return Kilo's model catalog.
+
+    Returns [] only when no key is configured, which is a deliberate
+    deployment state rather than a failure. Raises KiloUnavailable if the
+    gateway is configured but unreachable or erroring, so callers can tell
+    "Kilo says zero models" apart from "Kilo did not answer".
+    """
     key = _settings.kilo_api_key
     if not key:
+        log.warning("kilo_models_skipped_no_key")
         return []
 
     cached = await cache.get(CACHE_KEY)
@@ -85,7 +103,25 @@ async def fetch_models() -> list[ModelPricing]:
             )
             resp.raise_for_status()
             data = resp.json().get("data") or []
-            normalized = [m for r in data if (m := _normalize(r)) is not None]
+            # Per-record isolation: one malformed record must not be reported
+            # as a gateway outage. _normalize assumes a str id and dict-ish
+            # pricing, so schema drift on a single entry would otherwise fall
+            # into the except below and 503 the whole catalog -- mislabeling a
+            # data problem as an availability problem, which is exactly the
+            # conflation this change exists to remove. Mirrors the per-record
+            # guard model-speed already has in _normalize_pricing_api.
+            normalized: list[ModelPricing] = []
+            skipped = 0
+            for r in data:
+                try:
+                    m = _normalize(r)
+                except (TypeError, ValueError, AttributeError):
+                    skipped += 1
+                    continue
+                if m is not None:
+                    normalized.append(m)
+            if skipped:
+                log.warning("kilo_models_records_skipped", skipped=skipped, total=len(data))
             if normalized:
                 await cache.set(
                     CACHE_KEY,
@@ -95,8 +131,8 @@ async def fetch_models() -> list[ModelPricing]:
             log.info("kilo_models_fetch_ok", count=len(normalized))
             return normalized
         except Exception as exc:
-            log.warning("kilo_models_fetch_failed", error=str(exc))
-            return []
+            log.error("kilo_models_fetch_failed", error=str(exc), base_url=_BASE_URL)
+            raise KiloUnavailable(f"Kilo gateway unavailable: {exc}") from exc
 
 
 async def get_model(model_id: str) -> ModelPricing | None:
