@@ -69,7 +69,7 @@ Compare the same model across four distinct purchasing channels:
 | Endpoint | Method | Response | Purpose |
 |----------|--------|----------|---------|
 | `GET /healthz` | GET | `{"status": "ok"}` | Kubernetes liveness probe |
-| `GET /readyz` | GET | `{"db": true, "redis": true, "ready": true}` | Kubernetes readiness probe (checks DB + Redis connectivity; 503 when either is down) |
+| `GET /readyz` | GET | `{"db": true, "redis": true, "ready": true}` | Kubernetes readiness probe. Reports DB + Redis connectivity; **503 only when Postgres is down**. A Redis outage returns 200 with `redis: false` — the cache falls back to an in-process dict by design, so the API stays serving. |
 | `GET /metrics` | GET | Prometheus text format | Prometheus metrics (request count, latency, errors) |
 
 ### Models

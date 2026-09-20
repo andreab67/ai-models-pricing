@@ -51,8 +51,8 @@ spec:
             requests: { cpu: 100m, memory: 192Mi }
             limits:   { cpu: 1,    memory: 512Mi }
           # timeoutSeconds is explicit because the kubelet default is 1s and
-          # /readyz makes four network round trips (Postgres SELECT 1, plus a
-          # Redis set AND get). That does not reliably finish inside a second:
+          # /readyz makes two network round trips (Postgres SELECT 1 and a
+          # Redis PING). That does not reliably finish inside a second:
           # on 2026-09-20 it failed three times in 49 minutes with "context
           # deadline exceeded". The handler now bounds itself at
           # _READYZ_BUDGET_S (2s, api/app/routes/health.py), so this deadline
