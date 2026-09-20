@@ -69,7 +69,7 @@ Compare the same model across four distinct purchasing channels:
 | Endpoint | Method | Response | Purpose |
 |----------|--------|----------|---------|
 | `GET /healthz` | GET | `{"status": "ok"}` | Kubernetes liveness probe |
-| `GET /readyz` | GET | `{"status": "ok"}` | Kubernetes readiness probe (checks DB + Redis connectivity) |
+| `GET /readyz` | GET | `{"db": true, "redis": true, "ready": true}` | Kubernetes readiness probe (checks DB + Redis connectivity; 503 when either is down) |
 | `GET /metrics` | GET | Prometheus text format | Prometheus metrics (request count, latency, errors) |
 
 ### Models
