@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import re
 import time
@@ -36,10 +37,13 @@ class Cache:
         if self._client is None:
             try:
                 self._client = redis.from_url(self._url, decode_responses=True)
-                # redis-py returns Awaitable[bool] from a sync call site under
-                # type stubs but a raw bool in the legacy stubs mypy ships with.
+                # redis-py types ping() as Union[Awaitable, Any], so it may hand
+                # back either an awaitable or a raw bool. isawaitable, NOT
+                # iscoroutine, so a Future/Task is awaited too rather than
+                # dropped unawaited -- dropping it would skip the connectivity
+                # check this call exists to perform.
                 ping_result = self._client.ping()
-                if asyncio.iscoroutine(ping_result):
+                if inspect.isawaitable(ping_result):
                     await ping_result
             except Exception as exc:
                 safe_url = re.sub(r":[^@]+@", ":@", self._url)
@@ -108,6 +112,36 @@ class Cache:
                 self._mem.pop(key, None)
                 return
             self._mem[key] = (time.time() + ttl, raw)
+
+    async def ping(self) -> bool:
+        """True only when the REAL Redis answered.
+
+        Deliberately NOT expressible via get()/set(): those fall back to the
+        in-process dict by design, so during a Redis outage they SUCCEED and
+        cannot tell you whether Redis is actually there. A readiness probe
+        built on them reports redis=true no matter what, which is worse than
+        not reporting at all. This reaches the client directly instead.
+        """
+        client = await self._client_or_none()
+        if client is None:
+            return False
+        try:
+            result = client.ping()
+            # Same stub inconsistency _client_or_none() works around: redis-py
+            # types ping() as Union[Awaitable, Any], so it may hand back either
+            # an awaitable or a raw bool. isawaitable, NOT iscoroutine: a Future,
+            # a Task or any __await__ object is not a coroutine, so iscoroutine
+            # would skip the await and bool() a live awaitable -- which is
+            # unconditionally True. That would report redis=true straight
+            # through an outage, the exact silent pass this method exists to
+            # stop.
+            if inspect.isawaitable(result):
+                result = await result
+            return bool(result)
+        except Exception as exc:
+            log.warning("redis_ping_failed", error=str(exc))
+            self._client = None
+            return False
 
     async def close(self) -> None:
         if self._client is not None:

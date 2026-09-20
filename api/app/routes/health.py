@@ -12,10 +12,11 @@ from app.services.cache import cache
 
 router = APIRouter(tags=["meta"])
 
-# /readyz makes four network round trips and none of the clients below carries
-# a deadline of its own, so a hung Postgres or Redis would hold the handler
-# open until the kubelet gave up -- surfacing as the opaque "context deadline
-# exceeded" rather than a 503 naming the dependency. Bound each check instead.
+# /readyz makes two network round trips (Postgres SELECT 1, Redis PING) and
+# none of the clients below carries a deadline of its own, so a hung Postgres
+# or Redis would hold the handler open until the kubelet gave up -- surfacing
+# as the opaque "context deadline exceeded" rather than a 503 naming the
+# dependency. Bound the checks instead.
 # Keep this under the readinessProbe timeoutSeconds in
 # k8s/base/api-deployment.yaml (currently 3s).
 _READYZ_BUDGET_S = 2.0
@@ -41,7 +42,19 @@ async def healthz() -> dict[str, str]:
 
 @router.get("/readyz")
 async def readyz(response: Response) -> dict[str, object]:
-    """Returns 503 if Postgres or Redis is unreachable."""
+    """503 when Postgres is unreachable. Redis is REPORTED, not gated.
+
+    Gating readiness on Redis would be wrong here: Cache exists precisely so
+    the API survives a Redis outage ("the fallback keeps the API alive when
+    Redis dies"), so failing the probe would take the whole API down for an
+    outage the design deliberately tolerates.
+
+    This is not a loosening. `redis_ok` was previously derived from a
+    cache.set/cache.get round trip, which the in-memory fallback always
+    satisfies -- it could never be False, so `ready` was already just `db_ok`.
+    The change is that redis is now probed for real and reported honestly, so
+    an outage is visible in the body instead of being silently absorbed.
+    """
 
     async def _db() -> bool:
         async with session_scope() as session:
@@ -49,8 +62,7 @@ async def readyz(response: Response) -> dict[str, object]:
         return True
 
     async def _redis() -> bool:
-        await cache.set("readyz:probe", 1, ttl=5)
-        return await cache.get("readyz:probe") == 1
+        return await cache.ping()
 
     # Both checks run CONCURRENTLY under one budget. Bounding them one after
     # the other would be wrong twice over: the handler could run for twice
@@ -86,7 +98,8 @@ async def readyz(response: Response) -> dict[str, object]:
     db_ok = results["db"]
     redis_ok = results["redis"]
 
-    ready = db_ok and redis_ok
+    # Postgres only -- see the docstring.
+    ready = db_ok
     if not ready:
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
 
