@@ -8,7 +8,6 @@ from sqlalchemy import (
     BigInteger,
     DateTime,
     Float,
-    Index,
     String,
     Text,
     UniqueConstraint,
@@ -23,10 +22,9 @@ class ModelPricingSnapshot(Base):
     """One row per (model, captured_at). Append-only — drives trends."""
 
     __tablename__ = "model_pricing_snapshot"
-    __table_args__ = (
-        UniqueConstraint("model_id", "captured_at", name="uq_model_captured"),
-        Index("ix_model_pricing_model_id_captured", "model_id", "captured_at"),
-    )
+    # uq_model_captured is backed by a btree on (model_id, captured_at), which
+    # already serves per-model history lookups; no separate index is needed.
+    __table_args__ = (UniqueConstraint("model_id", "captured_at", name="uq_model_captured"),)
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     model_id: Mapped[str] = mapped_column(String(255), nullable=False)
@@ -56,7 +54,11 @@ class ModelPricingSnapshot(Base):
 
 
 class KiloPlanSnapshot(Base):
-    """Snapshot of Kilo Pass tier definitions — change detection."""
+    """Kilo Pass tier definitions per pricing-page hash — change detection.
+
+    The kilo-diff job writes one row per tier whenever the page hash changes;
+    the newest ``source_hash`` is the baseline for the next run.
+    """
 
     __tablename__ = "kilo_plan_snapshot"
 

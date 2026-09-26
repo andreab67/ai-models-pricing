@@ -26,7 +26,7 @@
   <body>
     <div class="wrap">
       <h1>Top 5 coding models — {{ generated_at }}</h1>
-      <p class="sub">Ranked by blended USD/Mtok (30% input, 70% output) with tool support and ≥64k context.</p>
+      <p class="sub">Ranked by blended USD/Mtok ({{ input_weight_pct }}% input, {{ output_weight_pct }}% output) with tool support and ≥{{ "{:,}".format(min_context_tokens) }}-token context.</p>
       <table>
         <thead>
           <tr>

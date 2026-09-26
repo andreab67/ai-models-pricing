@@ -34,6 +34,29 @@ def _to_mtok(per_token: str | float | None) -> float:
         return 0.0
 
 
+def _float_or_zero(value: Any) -> float:
+    try:
+        return float(value or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _normalize_all(data: list[Any]) -> list[ModelPricing]:
+    """Normalize every record; one malformed record must not drop the catalog."""
+    normalized: list[ModelPricing] = []
+    for r in data:
+        if not isinstance(r, dict):
+            continue
+        try:
+            m = _normalize(r)
+        except Exception as exc:
+            log.warning("kilo_model_skipped", model_id=r.get("id"), error=str(exc))
+            continue
+        if m is not None:
+            normalized.append(m)
+    return normalized
+
+
 def _normalize(raw: dict[str, Any]) -> ModelPricing | None:
     pricing = raw.get("pricing") or {}
     arch = raw.get("architecture") or {}
@@ -57,8 +80,8 @@ def _normalize(raw: dict[str, Any]) -> ModelPricing | None:
         provider=provider,
         prompt_usd_per_mtok=round(prompt, 4),
         completion_usd_per_mtok=round(completion, 4),
-        request_usd=float(pricing.get("request") or 0),
-        image_usd=float(pricing.get("image") or 0),
+        request_usd=_float_or_zero(pricing.get("request")),
+        image_usd=_float_or_zero(pricing.get("image")),
         context_length=raw.get("context_length"),
         max_completion_tokens=(raw.get("top_provider") or {}).get("max_completion_tokens"),
         supports_tools="tools" in (raw.get("supported_parameters") or []),
@@ -85,7 +108,7 @@ async def fetch_models() -> list[ModelPricing]:
             )
             resp.raise_for_status()
             data = resp.json().get("data") or []
-            normalized = [m for r in data if (m := _normalize(r)) is not None]
+            normalized = _normalize_all(data)
             if normalized:
                 await cache.set(
                     KILO_MODELS_CACHE_KEY,
