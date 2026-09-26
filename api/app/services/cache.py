@@ -70,21 +70,26 @@ class Cache:
                 return self._client
             if time.monotonic() < self._next_connect_at:
                 return None
-            client = redis.from_url(
-                self._url,
-                decode_responses=True,
-                socket_connect_timeout=_SOCKET_TIMEOUT_S,
-                socket_timeout=_SOCKET_TIMEOUT_S,
-            )
+            client: redis.Redis | None = None
             try:
-                await client.ping()
+                # Inside the try: from_url parses eagerly and raises on a bad
+                # REDIS_URL, which must degrade to the in-memory fallback too.
+                new_client = redis.from_url(
+                    self._url,
+                    decode_responses=True,
+                    socket_connect_timeout=_SOCKET_TIMEOUT_S,
+                    socket_timeout=_SOCKET_TIMEOUT_S,
+                )
+                client = new_client
+                await new_client.ping()
             except Exception as exc:
                 log.warning("redis_unavailable", url=self._safe_url(), error=str(exc))
                 self._next_connect_at = time.monotonic() + _RECONNECT_BACKOFF_S
-                try:
-                    await client.aclose()
-                except Exception:  # noqa: S110 — best-effort cleanup
-                    pass
+                if client is not None:
+                    try:
+                        await client.aclose()
+                    except Exception:  # noqa: S110 — best-effort cleanup
+                        pass
                 return None
             self._client = client
             return client
@@ -106,12 +111,19 @@ class Cache:
         if client is not None:
             try:
                 raw = await client.get(key)
-                if raw is None:
-                    return None
-                return json.loads(raw)
             except Exception as exc:
                 log.warning("redis_get_failed", key=key, error=str(exc))
                 self._mark_down()
+            else:
+                if raw is None:
+                    return None
+                # A corrupt value is a data problem, not a connectivity one:
+                # drop it without tearing down the healthy client.
+                try:
+                    return json.loads(raw)
+                except json.JSONDecodeError:
+                    log.warning("cache_corrupt_value", key=key, backend="redis")
+                    return None
 
         async with self._lock:
             entry = self._mem.get(key)

@@ -95,6 +95,8 @@ export async function GET(
   const headers = new Headers();
   const contentType = res.headers.get("content-type");
   if (contentType) headers.set("content-type", contentType);
-  headers.set("cache-control", "no-store");
+  // Public catalog data may be cached briefly; account data and errors never.
+  const isAccount = ACCOUNT_ROUTES.some((re) => re.test(path));
+  headers.set("cache-control", res.ok && !isAccount ? "public, max-age=60" : "no-store");
   return new Response(res.body, { status: res.status, headers });
 }

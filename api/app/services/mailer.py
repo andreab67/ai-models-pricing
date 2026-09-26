@@ -13,10 +13,14 @@ log = get_logger(__name__)
 _settings = get_settings()
 
 
-async def send(subject: str, html: str, text: str) -> None:
+async def send(subject: str, html: str, text: str) -> bool:
+    """Send an email. Returns False (without raising) when SMTP is not configured.
+
+    Callers for which delivery matters must check the result.
+    """
     if not _settings.smtp_host or not _settings.smtp_to:
         log.warning("smtp_not_configured", host=_settings.smtp_host, to=_settings.smtp_to)
-        return
+        return False
 
     msg = EmailMessage()
     msg["From"] = _settings.smtp_from
@@ -40,3 +44,4 @@ async def send(subject: str, html: str, text: str) -> None:
         subject=subject,
         bytes=len(html),
     )
+    return True

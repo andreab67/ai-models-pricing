@@ -175,7 +175,7 @@ async def test_cache_falls_back_and_reports_redis_down() -> None:
 
 
 async def _run_kilo_diff(
-    monkeypatch: pytest.MonkeyPatch, last: str | None, new: str
+    monkeypatch: pytest.MonkeyPatch, last: str | None, new: str, delivered: bool = True
 ) -> tuple[int, list[str], list[str]]:
     sent: list[str] = []
     recorded: list[str] = []
@@ -189,8 +189,9 @@ async def _run_kilo_diff(
     async def _record(h: str) -> None:
         recorded.append(h)
 
-    async def _send(subject: str, html: str, text: str) -> None:
+    async def _send(subject: str, html: str, text: str) -> bool:
         sent.append(subject)
+        return delivered
 
     class _Engine:
         async def dispose(self) -> None:
@@ -300,3 +301,76 @@ def test_version_matches_pyproject() -> None:
     pyproject = Path(app_pkg.__file__).resolve().parent.parent / "pyproject.toml"
     with pyproject.open("rb") as f:
         assert app_pkg.__version__ == tomllib.load(f)["project"]["version"]
+
+
+# --- review round 3 (Kilo Code Review on PR #3) ---------------------------------
+
+
+async def test_kilo_diff_keeps_baseline_when_alert_not_delivered(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    rc, sent, recorded = await _run_kilo_diff(monkeypatch, last="old", new="new", delivered=False)
+    assert rc == 1
+    assert len(sent) == 1
+    assert recorded == []
+
+
+async def test_invalid_redis_url_falls_back_to_memory() -> None:
+    c = Cache("http://not-a-redis-url", default_ttl=60)
+    await c.set("k", {"v": 1})
+    assert await c.get("k") == {"v": 1}
+    assert await c.redis_available() is False
+
+
+async def test_corrupt_redis_value_does_not_mark_redis_down(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import app.services.cache as cache_mod
+
+    class _Redis:
+        async def ping(self) -> bool:
+            return True
+
+        async def get(self, key: str) -> str:
+            return "{not json"
+
+        async def aclose(self) -> None:
+            return None
+
+    monkeypatch.setattr(cache_mod.redis, "from_url", lambda *a, **k: _Redis())
+    c = Cache("redis://fake:6379/0", default_ttl=60)
+    assert await c.get("k") is None
+    assert c._client is not None  # still connected
+
+
+def test_openai_amount_tolerates_scalar_amount() -> None:
+    assert accounts._openai_amount({"amount": "1.5"}) == 0.0
+    assert accounts._openai_amount({"amount": None}) == 0.0
+    assert accounts._openai_amount({"amount": {"value": "2.5"}}) == 2.5
+
+
+def test_readyz_probes_run_concurrently_under_one_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import asyncio
+    import time
+
+    from app.routes import health
+
+    async def _slow_db() -> bool:
+        await asyncio.sleep(1.2)
+        return True
+
+    async def _slow_redis() -> bool:
+        await asyncio.sleep(1.2)
+        return True
+
+    monkeypatch.setattr(health, "_db_ok", _slow_db)
+    monkeypatch.setattr(health.cache, "redis_available", _slow_redis)
+    client = TestClient(app)
+    start = time.perf_counter()
+    resp = client.get("/readyz")
+    elapsed = time.perf_counter() - start
+    assert resp.status_code == 200
+    assert resp.json() == {"db": True, "redis": True, "ready": True}
+    assert elapsed < 2.0  # sequential would take ~2.4s

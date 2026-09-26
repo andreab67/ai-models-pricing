@@ -127,21 +127,21 @@ Compare the same model across four distinct purchasing channels:
   "channels": [
     {
       "channel": "openrouter_payg",
-      "prompt_usd_per_mtok": 2.85,
-      "completion_usd_per_mtok": 14.25,
+      "prompt_usd_per_mtok": 3.165,
+      "completion_usd_per_mtok": 15.825,
       "notes": "+5.5% credit purchase fee"
     },
     {
       "channel": "openrouter_byok",
-      "prompt_usd_per_mtok": 2.82,
-      "completion_usd_per_mtok": 14.10,
+      "prompt_usd_per_mtok": 3.15,
+      "completion_usd_per_mtok": 15.75,
       "notes": "+5.0% past 1M reqs/mo"
     },
     {
       "channel": "kilo_pass",
-      "prompt_usd_per_mtok": 2.1,
-      "completion_usd_per_mtok": 10.5,
-      "notes": "tier=pro, month 8, 30.0% effective discount"
+      "prompt_usd_per_mtok": 2.1429,
+      "completion_usd_per_mtok": 10.7143,
+      "notes": "tier=pro, month 8, 28.6% effective discount"
     },
     {
       "channel": "kilo_byok",

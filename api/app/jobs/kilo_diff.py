@@ -69,10 +69,16 @@ async def _main() -> int:
                 f"<strong>New:</strong> {new_hash}</p>"
                 f"<p>Refresh <code>api/app/data/kilo_plans.yaml</code>.</p>"
             )
-            await send(subject, html, "Kilo pricing page changed — refresh kilo_plans.yaml")
+            delivered = await send(
+                subject, html, "Kilo pricing page changed — refresh kilo_plans.yaml"
+            )
+            if not delivered:
+                # Keep the old baseline so the change is reported once mail works,
+                # instead of recording it and losing the alert for good.
+                raise RuntimeError("pricing change alert not delivered (SMTP not configured)")
 
-        # Record only after the alert went out, so a failed send is retried
-        # on the next run instead of being swallowed.
+        # Record only after the alert was delivered, so a failed or skipped
+        # send is retried on the next run instead of being swallowed.
         await record_hash(new_hash)
         return 0
     except Exception as exc:

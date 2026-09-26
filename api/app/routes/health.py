@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Coroutine
+from typing import Any
 
 from fastapi import APIRouter, Response, status
 from sqlalchemy import text
@@ -12,7 +14,9 @@ from app.services.cache import cache
 
 router = APIRouter(tags=["meta"])
 
-_PROBE_TIMEOUT_S = 3.0
+# Both probes run concurrently under one budget, so the handler finishes in
+# about this long even when Redis is slow; keep the probe timeoutSeconds above.
+_READYZ_BUDGET_S = 2.0
 
 
 @router.get("/healthz")
@@ -26,6 +30,13 @@ async def _db_ok() -> bool:
     return True
 
 
+async def _bounded(probe: Coroutine[Any, Any, bool]) -> bool:
+    try:
+        return bool(await asyncio.wait_for(probe, timeout=_READYZ_BUDGET_S))
+    except Exception:
+        return False
+
+
 @router.get("/readyz")
 async def readyz(response: Response) -> dict[str, object]:
     """Returns 503 if Postgres is unreachable.
@@ -34,15 +45,9 @@ async def readyz(response: Response) -> dict[str, object]:
     answers a PING) but does not gate readiness: the cache falls back to
     process memory, so the API keeps serving without it.
     """
-    try:
-        db_ok = await asyncio.wait_for(_db_ok(), timeout=_PROBE_TIMEOUT_S)
-    except Exception:
-        db_ok = False
-
-    try:
-        redis_ok = await asyncio.wait_for(cache.redis_available(), timeout=_PROBE_TIMEOUT_S)
-    except Exception:
-        redis_ok = False
+    db_ok, redis_ok = await asyncio.gather(
+        _bounded(_db_ok()), _bounded(cache.redis_available())
+    )
 
     ready = db_ok
     if not ready:

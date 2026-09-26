@@ -62,7 +62,9 @@ async def _openai_cost_buckets(
 
 
 def _openai_amount(result: dict[str, Any]) -> float:
-    amount = result.get("amount") or {}
+    amount = result.get("amount")
+    if not isinstance(amount, dict):
+        return 0.0
     try:
         return float(amount.get("value") or 0)
     except (TypeError, ValueError):

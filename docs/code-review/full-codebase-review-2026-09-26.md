@@ -78,7 +78,7 @@ Additional manual verification:
 
 | Check | Result |
 |---|---|
-| `pytest -q` | 28 passed |
+| `pytest -q` | 33 passed |
 | `ruff check .` | clean |
 | `mypy app` | clean (25 files) |
 | `alembic upgrade head --sql` | 0001 → 0002 ok |
@@ -96,6 +96,7 @@ Additional manual verification:
 | 2 | Fixes in 4 commits; independent Opus challenge found R1–R11 |
 | 3 | R-fixes committed; second challenge found N1–N2 (low) and said nothing else was actionable |
 | 4 | N-fixes committed; full validation green |
+| 5 | Kilo Code Review on the PR: 4 warnings and 4 suggestions. All were verified and fixed: an invalid `REDIS_URL` escaping the fallback, sequential `/readyz` probes over the 1s kubelet timeout, `kilo_diff` recording a baseline when SMTP silently skipped the alert, and wrong numbers in the FUNCTIONAL.md comparison example. The suggestions (corrupt-value handling, scalar cost `amount`, brief public caching, BYOK example) rode along |
 
 ## Commits
 
