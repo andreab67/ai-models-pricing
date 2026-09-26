@@ -61,17 +61,73 @@ export interface KiloProjection {
   total_effective_credits_usd: number;
 }
 
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    public readonly status: number,
+  ) {
+    super(message);
+    this.name = "ApiError";
+  }
+}
+
+async function errorDetail(res: Response): Promise<string> {
+  try {
+    const body = (await res.json()) as { detail?: unknown };
+    if (typeof body.detail === "string") return body.detail;
+    if (Array.isArray(body.detail)) return "Invalid request parameters";
+  } catch {
+    // non-JSON error body
+  }
+  return res.statusText || "Request failed";
+}
+
 const fetcher = async <T,>(url: string): Promise<T> => {
   const res = await fetch(url);
   if (!res.ok) {
-    throw new Error(`${url} → ${res.status} ${res.statusText}`);
+    throw new ApiError(`${res.status}: ${await errorDetail(res)}`, res.status);
   }
   return (await res.json()) as T;
 };
 
+/** Encode a provider-qualified model id ("vendor/model:variant") for a URL path. */
+export function modelPath(modelId: string): string {
+  return modelId.split("/").map(encodeURIComponent).join("/");
+}
+
+export const STREAK_MIN = 1;
+export const STREAK_MAX = 120;
+
+export function clampStreak(n: number): number {
+  if (!Number.isFinite(n)) return STREAK_MIN;
+  return Math.min(STREAK_MAX, Math.max(STREAK_MIN, Math.trunc(n)));
+}
+
+/** Account endpoints return 404 when the web proxy does not expose them. */
+export function isNotExposed(error: unknown): boolean {
+  return error instanceof ApiError && error.status === 404;
+}
+
 const defaultConfig: SWRConfiguration = {
   revalidateOnFocus: false,
   refreshInterval: 300_000, // 5 min
+};
+
+/**
+ * Account endpoints answer 404 when the web proxy does not expose them
+ * (EXPOSE_ACCOUNT_DATA unset). That is a permanent answer, so do not retry
+ * it. Keep retrying other errors (SWR pauses interval polling while an error
+ * is set, so giving up would leave the panel stale until reload), with
+ * exponential backoff capped at 5 minutes.
+ */
+const accountConfig: SWRConfiguration = {
+  ...defaultConfig,
+  onErrorRetry: (error, _key, config, revalidate, { retryCount }) => {
+    if (error instanceof ApiError && error.status === 404) return;
+    const base = config.errorRetryInterval ?? 5_000;
+    const delay = Math.min(base * 2 ** retryCount, 300_000);
+    setTimeout(() => revalidate({ retryCount, dedupe: true }), delay);
+  },
 };
 
 export function useModels() {
@@ -89,7 +145,11 @@ export function useComparison(
   kiloAnnual: boolean,
 ) {
   const url = modelId
-    ? `/api/compare/${modelId}?kilo_tier=${kiloTier}&kilo_streak_months=${kiloStreakMonths}&kilo_annual=${kiloAnnual}`
+    ? `/api/compare/${modelPath(modelId)}?${new URLSearchParams({
+        kilo_tier: kiloTier,
+        kilo_streak_months: String(clampStreak(kiloStreakMonths)),
+        kilo_annual: String(kiloAnnual),
+      })}`
     : null;
   return useSWR<ModelComparison>(url, fetcher, defaultConfig);
 }
@@ -103,12 +163,16 @@ export function useKiloProjection(
   streakMonths: number,
   annual: boolean,
 ) {
-  const url = `/api/kilo/projection?tier=${tier}&streak_months=${streakMonths}&annual=${annual}`;
+  const url = `/api/kilo/projection?${new URLSearchParams({
+    tier,
+    streak_months: String(clampStreak(streakMonths)),
+    annual: String(annual),
+  })}`;
   return useSWR<KiloProjection>(url, fetcher, defaultConfig);
 }
 
 export function useHistory(modelId: string | null, days: number = 30) {
-  const url = modelId ? `/api/models/${modelId}/history?days=${days}` : null;
+  const url = modelId ? `/api/models/${modelPath(modelId)}/history?days=${days}` : null;
   return useSWR<ModelPricing[]>(url, fetcher, defaultConfig);
 }
 
@@ -131,10 +195,7 @@ export interface AccountsUsage {
 }
 
 export function useAccountUsage() {
-  return useSWR<AccountsUsage>("/api/accounts/usage", fetcher, {
-    ...defaultConfig,
-    refreshInterval: 300_000,
-  });
+  return useSWR<AccountsUsage>("/api/accounts/usage", fetcher, accountConfig);
 }
 
 export interface ModelActivityItem {
@@ -159,7 +220,7 @@ export function useKiloModels() {
 
 export function useActivity() {
   return useSWR<ActivityResponse>("/api/accounts/activity", fetcher, {
-    ...defaultConfig,
+    ...accountConfig,
     refreshInterval: 900_000, // 15 min
   });
 }
@@ -167,9 +228,11 @@ export function useActivity() {
 export function fmtUsd(n: number): string {
   if (!Number.isFinite(n)) return "—";
   if (n === 0) return "$0";
-  if (n < 0.01) return `$${n.toFixed(4)}`;
-  if (n < 1) return `$${n.toFixed(3)}`;
-  return `$${n.toFixed(2)}`;
+  const sign = n < 0 ? "-" : "";
+  const abs = Math.abs(n);
+  if (abs < 0.01) return `${sign}$${abs.toFixed(4)}`;
+  if (abs < 1) return `${sign}$${abs.toFixed(3)}`;
+  return `${sign}$${abs.toFixed(2)}`;
 }
 
 export function fmtSpeed(n: number | null | undefined): string {
