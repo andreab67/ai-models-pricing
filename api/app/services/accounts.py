@@ -193,7 +193,9 @@ async def get_activity() -> ActivityResponse:
                         requests=_to_int(r.get("request_count")),
                         prompt_tokens=_to_int(r.get("tokens_prompt")),
                         completion_tokens=_to_int(r.get("tokens_completion")),
-                        cost_usd=round(float(r.get("total_usage") or 0), 6),
+                        # _num, not float(): one malformed or non-finite
+                        # total_usage must not blank the whole usage table.
+                        cost_usd=round(_num(r.get("total_usage")), 6),
                     )
                 )
             items.sort(key=lambda x: x.cost_usd, reverse=True)
