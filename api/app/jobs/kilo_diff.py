@@ -102,7 +102,14 @@ async def _send_manual_review_email(old_hash: str, new_hash: str, reason: str) -
         f"<p>Please check https://kilo.ai/pricing and update "
         f"<code>{KILO_PLANS_REPO_PATH}</code> manually.</p>"
     )
-    await send(subject, html, f"Kilo pricing changed but needs manual review: {reason}")
+    delivered = await send(
+        subject, html, f"Kilo pricing changed but needs manual review: {reason}"
+    )
+    if not delivered:
+        # Nothing else surfaces this change, so keep the old baseline (the job
+        # exits non-zero) and re-alert once mail works, instead of recording
+        # the new hash and losing the alert for good.
+        raise RuntimeError("manual-review alert not delivered (SMTP not configured)")
 
 
 async def _send_auto_update_email(diff: dict, commit_url: str) -> None:
@@ -114,6 +121,8 @@ async def _send_auto_update_email(diff: dict, commit_url: str) -> None:
         f'<p><a href="{commit_url}">{commit_url}</a></p>'
         f"<p>No action needed — this is an FYI audit trail.</p>"
     )
+    # FYI only: the yaml commit already happened, so an undelivered email is
+    # logged (by send) but must not block recording the new baseline.
     await send(subject, html, f"Kilo pricing auto-updated: {diff} — {commit_url}")
 
 
@@ -138,7 +147,8 @@ async def _main() -> int:
             committed = await _handle_change(last_hash, new_hash, page_text)
 
         # Record only after the change was handled, so a failure (for example
-        # the GitLab commit raising) is retried on the next run.
+        # the GitLab commit raising, or an undelivered manual-review alert) is
+        # retried on the next run.
         await record_hash(new_hash, committed)
         return 0
     except Exception as exc:

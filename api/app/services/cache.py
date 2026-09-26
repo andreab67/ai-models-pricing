@@ -55,9 +55,10 @@ class Cache:
         if closer is None:
             return
         # Fire-and-forget close; a failing close must not mask the error.
+        # Best effort: no running loop, or a closer that is not a coroutine.
         try:
             task = asyncio.get_running_loop().create_task(closer())
-        except Exception:  # noqa: S110 — no loop / not a coroutine: best effort
+        except Exception:
             return
         _background_tasks.add(task)
         task.add_done_callback(_background_tasks.discard)
@@ -74,28 +75,33 @@ class Cache:
                 return self._client
             if time.monotonic() < self._next_connect_at:
                 return None
-            client = redis.from_url(
-                self._url,
-                decode_responses=True,
-                socket_connect_timeout=_SOCKET_TIMEOUT_S,
-                socket_timeout=_SOCKET_TIMEOUT_S,
-            )
+            client: redis.Redis | None = None
             try:
+                # Inside the try: from_url parses eagerly and raises on a bad
+                # REDIS_URL, which must degrade to the in-memory fallback too.
+                new_client = redis.from_url(
+                    self._url,
+                    decode_responses=True,
+                    socket_connect_timeout=_SOCKET_TIMEOUT_S,
+                    socket_timeout=_SOCKET_TIMEOUT_S,
+                )
+                client = new_client
                 # redis-py types ping() as Union[Awaitable, Any], so it may hand
                 # back either an awaitable or a raw bool. isawaitable, NOT
                 # iscoroutine, so a Future/Task is awaited too rather than
                 # dropped unawaited -- dropping it would skip the connectivity
                 # check this call exists to perform.
-                ping_result = client.ping()
+                ping_result = new_client.ping()
                 if inspect.isawaitable(ping_result):
                     await ping_result
             except Exception as exc:
                 log.warning("redis_unavailable", url=self._safe_url(), error=str(exc))
                 self._next_connect_at = time.monotonic() + _RECONNECT_BACKOFF_S
-                try:
-                    await client.aclose()
-                except Exception:  # noqa: S110 — best-effort cleanup
-                    pass
+                if client is not None:
+                    try:
+                        await client.aclose()
+                    except Exception:  # noqa: S110 — best-effort cleanup
+                        pass
                 return None
             self._client = client
             return client
