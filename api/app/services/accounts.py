@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import math
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -26,6 +27,24 @@ _FAILURE_CACHE_TTL = 30
 _OPENAI_COSTS_URL = "https://api.openai.com/v1/organization/costs"
 _ANTHROPIC_COST_REPORT_URL = "https://api.anthropic.com/v1/organizations/cost_report"
 _MAX_PAGES = 20
+
+
+def _num(v: object) -> float:
+    """Coerce an upstream numeric field (int, float or string) to a finite float.
+
+    A malformed or non-finite value ("NaN", "abc", a dict) yields 0.0 so one
+    bad record cannot discard the whole provider result.
+    """
+    try:
+        n = float(v) if v is not None else 0.0  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return 0.0
+    return n if math.isfinite(n) else 0.0
+
+
+def _to_int(v: object) -> int:
+    """Coerce an upstream count (int, float or string) to an int; malformed -> 0."""
+    return int(_num(v))
 
 
 async def _openai_cost_buckets(
@@ -402,13 +421,17 @@ async def get_activity() -> ActivityResponse:
             # Aggregate by model_id — API returns one row per key/date bucket
             agg: dict[str, ModelActivityItem] = {}
             for e in entries:
-                model_id = e.get("model") or e.get("model_id") or ""
-                if not model_id:
+                # Parse per record: one malformed row is skipped or zeroed,
+                # never allowed to blank the whole usage table.
+                if not isinstance(e, dict):
                     continue
-                cost = float(e.get("total_cost") or e.get("cost") or e.get("usage") or 0)
-                reqs = int(e.get("requests") or e.get("count") or 0)
-                p_tok = int(e.get("prompt_tokens") or e.get("input_tokens") or 0)
-                c_tok = int(e.get("completion_tokens") or e.get("output_tokens") or 0)
+                model_id = e.get("model") or e.get("model_id") or ""
+                if not isinstance(model_id, str) or not model_id:
+                    continue
+                cost = _num(e.get("total_cost") or e.get("cost") or e.get("usage"))
+                reqs = _to_int(e.get("requests") or e.get("count"))
+                p_tok = _to_int(e.get("prompt_tokens") or e.get("input_tokens"))
+                c_tok = _to_int(e.get("completion_tokens") or e.get("output_tokens"))
                 if model_id in agg:
                     existing = agg[model_id]
                     agg[model_id] = ModelActivityItem(

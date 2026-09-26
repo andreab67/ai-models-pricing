@@ -349,6 +349,35 @@ def test_openai_amount_tolerates_scalar_amount() -> None:
     assert accounts._openai_amount({"amount": {"value": "2.5"}}) == 2.5
 
 
+@respx.mock
+async def test_openrouter_activity_survives_one_malformed_row(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def _miss(_key: str) -> None:
+        return None
+
+    async def _noop(*_a: Any, **_k: Any) -> None:
+        return None
+
+    monkeypatch.setattr(accounts.cache, "get", _miss)
+    monkeypatch.setattr(accounts.cache, "set", _noop)
+    monkeypatch.setattr(accounts._settings, "openrouter_api_key", "k")
+    respx.get("https://openrouter.ai/api/v1/activity").mock(
+        return_value=httpx.Response(200, json={"data": [
+            {"model": "a/good", "total_cost": "1.25", "requests": "3"},
+            {"model": "b/bad", "total_cost": "not-a-number", "requests": {"x": 1}},
+            "garbage-row",
+            {"model": "a/good", "total_cost": 0.75, "requests": 1},
+        ]})
+    )
+    result = await accounts.get_activity()
+    by_id = {i.model_id: i for i in result.items}
+    assert by_id["a/good"].cost_usd == 2.0
+    assert by_id["a/good"].requests == 4
+    assert by_id["b/bad"].cost_usd == 0.0
+    assert accounts._num("NaN") == 0.0
+
+
 def test_readyz_probes_run_concurrently_under_one_budget(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
