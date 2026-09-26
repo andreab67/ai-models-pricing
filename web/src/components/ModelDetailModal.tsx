@@ -7,14 +7,13 @@ import {
   BarChart,
   CartesianGrid,
   Legend,
-  Line,
-  LineChart,
   ResponsiveContainer,
   Tooltip,
   XAxis,
   YAxis,
 } from "recharts";
 
+import { PriceHistoryChart } from "@/components/PriceHistoryChart";
 import { fmtUsd, useActivity, useComparison, useHistory } from "@/lib/api";
 import { CHART_BLUE, CHART_GREEN } from "@/lib/chartTheme";
 
@@ -44,7 +43,7 @@ export function ModelDetailModal({
   const closeRef = useRef<HTMLButtonElement>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
 
-  const { data: comparison, isLoading } = useComparison(
+  const { data: comparison, isLoading, error } = useComparison(
     modelId,
     kiloTier,
     kiloStreakMonths,
@@ -133,6 +132,11 @@ export function ModelDetailModal({
         </div>
 
         {isLoading && <p className="text-sm opacity-60">Loading…</p>}
+        {error && !isLoading && (
+          <p className="text-sm text-red-500" role="alert">
+            Could not load this model: {error.message}
+          </p>
+        )}
 
         {comparison && (
           <>
@@ -215,51 +219,7 @@ export function ModelDetailModal({
                   30-day price history ({history.length} snapshots)
                 </h3>
                 <div className="h-40">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <LineChart
-                      data={history.map((h, i) => ({
-                        date: `${i === 0 ? "Start" : i === history.length - 1 ? "Now" : ""}`,
-                        input: h.prompt_usd_per_mtok,
-                        output: h.completion_usd_per_mtok,
-                      }))}
-                    >
-                      <CartesianGrid stroke="rgb(var(--border))" strokeDasharray="3 3" />
-                      <XAxis
-                        dataKey="date"
-                        stroke="rgb(var(--muted))"
-                        fontSize={11}
-                        allowDuplicatedCategory={false}
-                      />
-                      <YAxis stroke="rgb(var(--muted))" fontSize={11} />
-                      <Tooltip
-                        contentStyle={{
-                          background: "rgb(var(--card))",
-                          border: "1px solid rgb(var(--border))",
-                          color: "rgb(var(--fg))",
-                        }}
-                        formatter={(v: number) => fmtUsd(v)}
-                      />
-                      <Legend wrapperStyle={{ fontSize: 11 }} />
-                      <Line
-                        type="monotone"
-                        dataKey="input"
-                        name="In $/Mtok"
-                        stroke={CHART_BLUE}
-                        dot={false}
-                        strokeWidth={1.5}
-                        isAnimationActive={false}
-                      />
-                      <Line
-                        type="monotone"
-                        dataKey="output"
-                        name="Out $/Mtok"
-                        stroke={CHART_GREEN}
-                        dot={false}
-                        strokeWidth={1.5}
-                        isAnimationActive={false}
-                      />
-                    </LineChart>
-                  </ResponsiveContainer>
+                  <PriceHistoryChart history={history} compact />
                 </div>
               </>
             )}
