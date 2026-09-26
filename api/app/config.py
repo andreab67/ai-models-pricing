@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -90,12 +91,18 @@ class Settings(BaseSettings):
     openrouter_admin_key: str = Field(default="")
     kilo_api_key: str = Field(default="")
 
-    # --- kilo plan (used for account widget) -----------------------------
-    kilo_tier: str = Field(default="starter")
+    # --- kilo plan (account widget + daily report savings) ---------------
+    # Must be a tier in kilo_plans.yaml; an unknown value fails fast at start.
+    kilo_tier: Literal["starter", "pro", "expert"] = Field(default="starter")
 
     # --- comparison wrappers ---------------------------------------------
     openrouter_payg_fee_pct: float = Field(default=0.055)
     openrouter_byok_fee_pct: float = Field(default=0.05)
+
+    @field_validator("kilo_tier", mode="before")
+    @classmethod
+    def _normalize_tier(cls, v: object) -> object:
+        return v.strip().lower() if isinstance(v, str) else v
 
 
 @lru_cache(maxsize=1)

@@ -1,11 +1,14 @@
 """CronJob entrypoint: keep kilo_plans.yaml in sync with kilo.ai/pricing.
 
-Stores the last page hash in Redis. On a hash change: extracts the tier
-figures via an LLM, sanity-checks them against the current yaml, and — if
-they pass and actually differ — commits the update straight to main via the
-GitLab API. GitLab CI then builds/deploys as normal. No human review step;
-an implausible extraction just falls back to the old "please check manually"
-email instead of being committed.
+Stores the last page hash in Postgres (``kilo_plan_snapshot``), not Redis:
+the cache silently falls back to process memory when Redis is down, which
+made every run look like a first run so changes were never detected. On a
+hash change: extracts the tier figures via an LLM, sanity-checks them
+against the current yaml, and — if they pass and actually differ — commits
+the update straight to main via the GitLab API. GitLab CI then
+builds/deploys as normal. No human review step; an implausible extraction
+just falls back to the old "please check manually" email instead of being
+committed.
 """
 
 from __future__ import annotations
@@ -14,19 +17,49 @@ import asyncio
 import sys
 from datetime import date
 
+from sqlalchemy import select
+
 from app.config import get_settings
+from app.db import engine, session_scope
 from app.logging import configure_logging, get_logger
+from app.models import KiloPlanSnapshot
+from app.schemas import KiloPlan
 from app.services import kilo, kilo_extract
 from app.services.cache import cache
 from app.services.gitlab_commit import commit_file
 from app.services.kilo import fetch_pricing_hash
 from app.services.mailer import send
 
-LAST_HASH_KEY = "kilo:pricing:last_hash"
 KILO_PLANS_REPO_PATH = "api/app/data/kilo_plans.yaml"
 
 
-async def _handle_change(old_hash: str, new_hash: str, page_text: str) -> None:
+async def last_known_hash() -> str | None:
+    async with session_scope() as session:
+        return await session.scalar(
+            select(KiloPlanSnapshot.source_hash)
+            .order_by(KiloPlanSnapshot.captured_at.desc(), KiloPlanSnapshot.id.desc())
+            .limit(1)
+        )
+
+
+async def record_hash(new_hash: str, plans: list[KiloPlan] | None = None) -> None:
+    """Persist the plan table under the new page hash (one row per tier)."""
+    rows = plans if plans is not None else kilo.load_plans()
+    async with session_scope() as session:
+        session.add_all(
+            KiloPlanSnapshot(
+                tier=p.tier,
+                monthly_usd=p.monthly_usd,
+                paid_credits_usd=p.paid_credits_usd,
+                max_bonus_pct=p.max_bonus_pct,
+                source_hash=new_hash,
+            )
+            for p in rows
+        )
+
+
+async def _handle_change(old_hash: str, new_hash: str, page_text: str) -> list[KiloPlan] | None:
+    """Handle a page change. Returns the committed plans on an auto-update."""
     log = get_logger("jobs.kilo_diff")
     current = kilo.load_raw()
 
@@ -35,18 +68,18 @@ async def _handle_change(old_hash: str, new_hash: str, page_text: str) -> None:
     except Exception as exc:
         log.error("kilo_extraction_failed", error=str(exc), exc_info=True)
         await _send_manual_review_email(old_hash, new_hash, reason=f"extraction failed: {exc}")
-        return
+        return None
 
     problems = kilo_extract.sanity_check(current, extracted)
     if problems:
         log.warning("kilo_extraction_rejected", old=old_hash, new=new_hash, problems=problems)
         await _send_manual_review_email(old_hash, new_hash, reason="; ".join(problems))
-        return
+        return None
 
     diff = kilo_extract.diff_from_current(current, extracted)
     if diff is None:
         log.info("kilo_pricing_hash_noise", old=old_hash, new=new_hash)
-        return
+        return None
 
     verified_date = date.today().isoformat()
     rendered = kilo_extract.render_kilo_plans_yaml(extracted, verified_date)
@@ -55,6 +88,7 @@ async def _handle_change(old_hash: str, new_hash: str, page_text: str) -> None:
 
     log.warning("kilo_pricing_auto_committed", diff=diff, commit_url=commit_url)
     await _send_auto_update_email(diff, commit_url)
+    return list(extracted.plans)
 
 
 async def _send_manual_review_email(old_hash: str, new_hash: str, reason: str) -> None:
@@ -90,27 +124,31 @@ async def _main() -> int:
 
     try:
         new_hash, page_text = await fetch_pricing_hash()
-        last_hash = await cache.get(LAST_HASH_KEY)
+        last_hash = await last_known_hash()
 
-        if last_hash and last_hash != new_hash:
-            log.warning("kilo_pricing_changed", old=last_hash, new=new_hash)
-            await _handle_change(last_hash, new_hash, page_text)
+        if last_hash == new_hash:
+            log.info("kilo_pricing_unchanged", hash=new_hash)
+            return 0
+
+        committed: list[KiloPlan] | None = None
+        if last_hash is None:
+            log.info("kilo_pricing_baseline_recorded", hash=new_hash)
         else:
-            log.info(
-                "kilo_pricing_unchanged",
-                hash=new_hash,
-                first_run=last_hash is None,
-            )
+            log.warning("kilo_pricing_changed", old=last_hash, new=new_hash)
+            committed = await _handle_change(last_hash, new_hash, page_text)
 
-        await cache.set(LAST_HASH_KEY, new_hash, ttl=60 * 60 * 24 * 30)
+        # Record only after the change was handled, so a failure (for example
+        # the GitLab commit raising) is retried on the next run.
+        await record_hash(new_hash, committed)
         return 0
     except Exception as exc:
         log.error("kilo_diff_failed", error=str(exc), exc_info=True)
         return 1
     finally:
-        # Close the Redis connection before the loop tears down, else redis-py's
-        # async deallocator logs a noisy "Event loop is closed" traceback on exit.
+        # Close Redis/DB connections before the loop tears down, else the async
+        # deallocators log noisy "Event loop is closed" tracebacks on exit.
         await cache.close()
+        await engine.dispose()
 
 
 if __name__ == "__main__":

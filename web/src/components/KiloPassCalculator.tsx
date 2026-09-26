@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 
-import { errMsg, useKiloProjection } from "@/lib/api";
+import { STREAK_MAX, STREAK_MIN, clampStreak, errMsg, useKiloProjection } from "@/lib/api";
 
 export function KiloPassCalculator() {
   const [tier, setTier] = useState("pro");
@@ -36,9 +36,9 @@ export function KiloPassCalculator() {
           <input
             type="number"
             value={streakMonths}
-            min={1}
-            max={120}
-            onChange={(e) => setStreakMonths(parseInt(e.target.value || "1", 10))}
+            min={STREAK_MIN}
+            max={STREAK_MAX}
+            onChange={(e) => setStreakMonths(clampStreak(parseInt(e.target.value, 10)))}
             disabled={annual}
             className="mt-1 block w-full rounded border border-border bg-card text-fg p-1 text-sm disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent"
           />
