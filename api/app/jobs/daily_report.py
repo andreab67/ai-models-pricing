@@ -13,7 +13,7 @@ from app.config import get_settings
 from app.logging import configure_logging, get_logger
 from app.services import openrouter, ranker
 from app.services.cache import cache
-from app.services.kilo import effective_discount
+from app.services.kilo import effective_discount, load_bonus_growth, steady_state_streak
 from app.services.mailer import send
 
 # A naive but defensible monthly baseline used for "projected savings":
@@ -48,13 +48,17 @@ async def _main() -> int:
             cheapest_cost = _baseline_cost(
                 cheapest.prompt_usd_per_mtok, cheapest.completion_usd_per_mtok
             )
-            # Apply Kilo Pass discount at the user's typical streak
-            discount = effective_discount("starter", 1, annual=False)
-            cheapest_cost *= (1 - discount)
+            # Apply the Kilo Pass discount for the configured tier at the
+            # steady-state streak. The month-1 welcome bonus is one-off and
+            # must not be projected as a recurring monthly saving.
+            tier = settings.kilo_tier
+            streak = steady_state_streak(load_bonus_growth())
+            discount = effective_discount(tier, streak, annual=False)
+            cheapest_cost *= 1 - discount
             savings = max(0.0, baseline_cost - cheapest_cost)
             assumption = (
                 f"{BASELINE_INPUT_MTOK}M in + {BASELINE_OUTPUT_MTOK}M out "
-                f"vs. {baseline.name}, with Kilo Pass (starter, m1)"
+                f"vs. {baseline.name}, with Kilo Pass ({tier}, month {streak}+)"
             )
 
         env = Environment(
@@ -68,6 +72,9 @@ async def _main() -> int:
             models=top5,
             projected_monthly_savings_usd=savings,
             baseline_assumption=assumption,
+            input_weight_pct=round(settings.rank_input_weight * 100),
+            output_weight_pct=round(settings.rank_output_weight * 100),
+            min_context_tokens=settings.rank_min_context_tokens,
         )
         text = "\n".join(
             [

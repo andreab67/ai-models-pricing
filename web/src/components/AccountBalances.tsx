@@ -2,6 +2,7 @@
 
 import {
   errMsg,
+  isNotExposed,
   useAccountUsage,
   useActivity,
   fmtUsd,
@@ -156,6 +157,10 @@ function OpenRouterCard({ account }: { account: AccountProviderUsage }) {
 
 export function AccountBalances() {
   const { data, error, isLoading } = useAccountUsage();
+
+  // Account data is private: the web proxy only serves it when
+  // EXPOSE_ACCOUNT_DATA=true. Otherwise hide the panel entirely.
+  if (isNotExposed(error)) return null;
 
   return (
     <div className="rounded-lg border border-border bg-card/50 p-4 space-y-3">

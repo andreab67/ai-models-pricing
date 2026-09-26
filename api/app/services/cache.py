@@ -17,6 +17,15 @@ from app.logging import get_logger
 log = get_logger(__name__)
 _settings = get_settings()
 
+# Bound every Redis round trip so a blackholed Redis cannot stall requests,
+# and back off between reconnect attempts instead of dialling on every call.
+_SOCKET_TIMEOUT_S = 2.0
+_RECONNECT_BACKOFF_S = 30.0
+
+# Strong references to fire-and-forget close tasks so they are not garbage
+# collected before they run.
+_background_tasks: set[asyncio.Task[Any]] = set()
+
 
 class Cache:
     """Async cache with Redis primary + in-memory fallback.
@@ -30,26 +39,72 @@ class Cache:
         self._url = url
         self._default_ttl = default_ttl
         self._client: redis.Redis | None = None
+        self._next_connect_at = 0.0
         self._mem: dict[str, tuple[float, str]] = {}
         self._lock = asyncio.Lock()
+        self._connect_lock = asyncio.Lock()
+
+    def _safe_url(self) -> str:
+        return re.sub(r":[^@/]+@", ":***@", self._url)
+
+    def _mark_down(self) -> None:
+        """Drop the current client and back off before reconnecting."""
+        client, self._client = self._client, None
+        self._next_connect_at = time.monotonic() + _RECONNECT_BACKOFF_S
+        closer = getattr(client, "aclose", None)
+        if closer is None:
+            return
+        # Fire-and-forget close; a failing close must not mask the error.
+        # Best effort: no running loop, or a closer that is not a coroutine.
+        try:
+            task = asyncio.get_running_loop().create_task(closer())
+        except Exception:
+            return
+        _background_tasks.add(task)
+        task.add_done_callback(_background_tasks.discard)
 
     async def _client_or_none(self) -> redis.Redis | None:
-        if self._client is None:
+        if self._client is not None:
+            return self._client
+        if time.monotonic() < self._next_connect_at:
+            return None
+        # One connect attempt at a time; concurrent callers reuse its result
+        # instead of each opening (and leaking) their own client.
+        async with self._connect_lock:
+            if self._client is not None:
+                return self._client
+            if time.monotonic() < self._next_connect_at:
+                return None
+            client: redis.Redis | None = None
             try:
-                self._client = redis.from_url(self._url, decode_responses=True)
+                # Inside the try: from_url parses eagerly and raises on a bad
+                # REDIS_URL, which must degrade to the in-memory fallback too.
+                new_client = redis.from_url(
+                    self._url,
+                    decode_responses=True,
+                    socket_connect_timeout=_SOCKET_TIMEOUT_S,
+                    socket_timeout=_SOCKET_TIMEOUT_S,
+                )
+                client = new_client
                 # redis-py types ping() as Union[Awaitable, Any], so it may hand
                 # back either an awaitable or a raw bool. isawaitable, NOT
                 # iscoroutine, so a Future/Task is awaited too rather than
                 # dropped unawaited -- dropping it would skip the connectivity
                 # check this call exists to perform.
-                ping_result = self._client.ping()
+                ping_result = new_client.ping()
                 if inspect.isawaitable(ping_result):
                     await ping_result
             except Exception as exc:
-                safe_url = re.sub(r":[^@]+@", ":@", self._url)
-                log.warning("redis_unavailable", url=safe_url, error=str(exc))
-                self._client = None
-        return self._client
+                log.warning("redis_unavailable", url=self._safe_url(), error=str(exc))
+                self._next_connect_at = time.monotonic() + _RECONNECT_BACKOFF_S
+                if client is not None:
+                    try:
+                        await client.aclose()
+                    except Exception:  # noqa: S110 — best-effort cleanup
+                        pass
+                return None
+            self._client = client
+            return client
 
     async def get(self, key: str) -> Any | None:
         client = await self._client_or_none()
@@ -69,7 +124,7 @@ class Cache:
                     return None
             except Exception as exc:
                 log.warning("redis_get_failed", key=key, error=str(exc))
-                self._client = None
+                self._mark_down()
 
         async with self._lock:
             entry = self._mem.get(key)
@@ -104,7 +159,7 @@ class Cache:
                 return
             except Exception as exc:
                 log.warning("redis_set_failed", key=key, error=str(exc))
-                self._client = None
+                self._mark_down()
 
         async with self._lock:
             if no_retain:
@@ -140,15 +195,16 @@ class Cache:
             return bool(result)
         except Exception as exc:
             log.warning("redis_ping_failed", error=str(exc))
-            self._client = None
+            self._mark_down()
             return False
 
     async def close(self) -> None:
         if self._client is not None:
             try:
-                await self._client.close()
+                await self._client.aclose()
             except Exception:  # noqa: S110
                 pass
+            self._client = None
 
 
 cache = Cache(_settings.redis_url, _settings.cache_ttl_seconds)

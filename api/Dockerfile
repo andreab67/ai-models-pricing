@@ -11,9 +11,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential \
     && rm -rf /var/lib/apt/lists/*
 
+# Build wheels for the runtime dependencies only. The application itself is
+# copied into /app in the runtime stage (with its data files and templates),
+# so there is no project wheel to build here.
 COPY pyproject.toml ./
-RUN pip install --upgrade pip wheel \
-    && pip wheel --wheel-dir /wheels .
+RUN python -c "import tomllib; print('\n'.join(tomllib.load(open('pyproject.toml', 'rb'))['project']['dependencies']))" > requirements.txt \
+    && pip install --upgrade pip wheel \
+    && pip wheel --wheel-dir /wheels -r requirements.txt
 
 # --------------------------------------------------------------------------
 FROM python:3.14-slim AS runtime
@@ -22,10 +26,12 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1
 
+# UID/GID 1000 matches the pods' securityContext (runAsUser/runAsGroup 1000).
 RUN apt-get update && apt-get install -y --no-install-recommends \
         curl \
     && rm -rf /var/lib/apt/lists/* \
-    && groupadd --system app && useradd --system --gid app --home /app app
+    && groupadd --gid 1000 app \
+    && useradd --uid 1000 --gid 1000 --no-create-home --home-dir /app app
 
 WORKDIR /app
 COPY --from=builder /wheels /wheels
@@ -34,10 +40,12 @@ RUN pip install --no-index --find-links=/wheels /wheels/*.whl \
 
 COPY --chown=app:app . /app
 
-USER app
+USER 1000:1000
 EXPOSE 8000
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
     CMD curl -fsS http://localhost:8000/healthz || exit 1
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]
+# One worker per pod: scale with replicas. Prometheus metrics then come from
+# a single process (see /metrics for the PROMETHEUS_MULTIPROC_DIR option).
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
