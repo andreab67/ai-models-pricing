@@ -224,3 +224,79 @@ async def test_kilo_diff_unchanged_is_quiet(monkeypatch: pytest.MonkeyPatch) -> 
     assert (rc, sent, recorded) == (0, [], [])
 
 
+
+
+# --- review round 2 -------------------------------------------------------------
+
+
+async def test_concurrent_reconnect_opens_one_client(monkeypatch: pytest.MonkeyPatch) -> None:
+    import asyncio
+
+    import app.services.cache as cache_mod
+
+    created: list[object] = []
+
+    class _FakeRedis:
+        def __init__(self) -> None:
+            created.append(self)
+            self.store: dict[str, str] = {}
+
+        async def ping(self) -> bool:
+            await asyncio.sleep(0.01)
+            return True
+
+        async def get(self, key: str) -> str | None:
+            return self.store.get(key)
+
+        async def aclose(self) -> None:
+            return None
+
+    monkeypatch.setattr(cache_mod.redis, "from_url", lambda *a, **k: _FakeRedis())
+    c = Cache("redis://fake:6379/0", default_ttl=60)
+    await asyncio.gather(*(c.get("k") for _ in range(20)))
+    assert len(created) == 1
+
+
+async def test_single_flight_shares_one_failing_refresh(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import asyncio
+
+    calls = 0
+
+    async def _miss(_key: str) -> None:
+        return None
+
+    async def _failing_refresh(persist: bool = True) -> list[Any]:
+        nonlocal calls
+        calls += 1
+        await asyncio.sleep(0.01)
+        raise httpx.ConnectError("upstream down")
+
+    monkeypatch.setattr(openrouter.cache, "get", _miss)
+    monkeypatch.setattr(openrouter, "refresh_pricing", _failing_refresh)
+    monkeypatch.setattr(openrouter, "_inflight_refresh", None)
+    results = await asyncio.gather(
+        *(openrouter.list_models() for _ in range(10)), return_exceptions=True
+    )
+    assert calls == 1
+    assert all(isinstance(r, httpx.ConnectError) for r in results)
+
+
+def test_kilo_tier_is_case_insensitive() -> None:
+    from app.config import Settings
+
+    assert Settings(kilo_tier="Pro").kilo_tier == "pro"
+    with pytest.raises(ValueError):
+        Settings(kilo_tier="enterprise")
+
+
+def test_version_matches_pyproject() -> None:
+    import tomllib
+    from pathlib import Path
+
+    import app as app_pkg
+
+    pyproject = Path(app_pkg.__file__).resolve().parent.parent / "pyproject.toml"
+    with pyproject.open("rb") as f:
+        assert app_pkg.__version__ == tomllib.load(f)["project"]["version"]

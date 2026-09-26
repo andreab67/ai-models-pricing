@@ -96,6 +96,20 @@ const defaultConfig: SWRConfiguration = {
   refreshInterval: 300_000, // 5 min
 };
 
+/**
+ * Account endpoints answer 404 when the web proxy does not expose them
+ * (EXPOSE_ACCOUNT_DATA unset). That is a permanent answer, so do not retry it.
+ */
+const accountConfig: SWRConfiguration = {
+  ...defaultConfig,
+  onErrorRetry: (error, _key, config, revalidate, { retryCount }) => {
+    if (error instanceof ApiError && error.status === 404) return;
+    if (retryCount >= 5) return;
+    const base = config.errorRetryInterval ?? 5_000;
+    setTimeout(() => revalidate({ retryCount }), base * 2 ** retryCount);
+  },
+};
+
 export function useModels() {
   return useSWR<ModelPricing[]>("/api/models", fetcher, defaultConfig);
 }
@@ -159,10 +173,7 @@ export interface AccountsUsage {
 }
 
 export function useAccountUsage() {
-  return useSWR<AccountsUsage>("/api/accounts/usage", fetcher, {
-    ...defaultConfig,
-    refreshInterval: 300_000,
-  });
+  return useSWR<AccountsUsage>("/api/accounts/usage", fetcher, accountConfig);
 }
 
 export interface ModelActivityItem {
@@ -180,14 +191,14 @@ export interface ActivityResponse {
 
 export function useActivity() {
   return useSWR<ActivityResponse>("/api/accounts/activity", fetcher, {
-    ...defaultConfig,
+    ...accountConfig,
     refreshInterval: 900_000, // 15 min
   });
 }
 
 export function useOpenAIActivity() {
   return useSWR<ActivityResponse>("/api/accounts/openai-activity", fetcher, {
-    ...defaultConfig,
+    ...accountConfig,
     refreshInterval: 900_000, // 15 min
   });
 }

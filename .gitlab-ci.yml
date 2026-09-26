@@ -1,7 +1,6 @@
 stages:
   - test
   - build
-  - scan
 
 variables:
   # Push target; defaults to the registry the k8s manifests pull from.
@@ -41,6 +40,10 @@ test:web:
   variables:
     npm_config_cache: "$CI_PROJECT_DIR/web/.npm"
 
+# Build, scan the freshly built image, then push only if it passes and
+# registry credentials are configured. The scan runs inside the dind daemon
+# (mounting its socket), so no multi-hundred-MB image tarball is uploaded as
+# an artifact.
 .docker-build:
   stage: build
   image: docker:27
@@ -51,9 +54,25 @@ test:web:
     DOCKER_TLS_CERTDIR: "/certs"
     DOCKER_TLS_VERIFY: "1"
     DOCKER_CERT_PATH: "/certs/client"
+    TRIVY_IMAGE: aquasec/trivy:0.58.1
   script:
     - docker build -t "${IMAGE}:${CI_COMMIT_SHORT_SHA}" "${CONTEXT}"
-    - docker save -o "${CONTEXT}-image.tar" "${IMAGE}:${CI_COMMIT_SHORT_SHA}"
+    # Scan the image this pipeline built (not the upstream base image).
+    # Report HIGH+CRITICAL as an artifact; fail on fixable CRITICAL findings.
+    # ${CONTEXT}/.trivyignore documents accepted findings.
+    - |
+      scan() {
+        cid=$(docker create -v /var/run/docker.sock:/var/run/docker.sock "$TRIVY_IMAGE" \
+          image --no-progress --ignore-unfixed --ignorefile /tmp/.trivyignore "$@" \
+          "${IMAGE}:${CI_COMMIT_SHORT_SHA}")
+        docker cp "${CONTEXT}/.trivyignore" "$cid:/tmp/.trivyignore"
+        rc=0
+        docker start -a "$cid" || rc=$?
+        docker rm "$cid" > /dev/null
+        return $rc
+      }
+      scan --severity HIGH,CRITICAL --exit-code 0 --format json > "${CONTEXT}-scan.json"
+      scan --severity CRITICAL --exit-code 1
     - |
       if [ -n "${REGISTRY_USER:-}" ] && [ -n "${REGISTRY_PASSWORD:-}" ]; then
         echo "$REGISTRY_PASSWORD" | docker login -u "$REGISTRY_USER" --password-stdin "$IMAGE_REGISTRY"
@@ -66,8 +85,9 @@ test:web:
         echo "REGISTRY_USER/REGISTRY_PASSWORD not set: image built and scanned, not pushed."
       fi
   artifacts:
-    paths: ["${CONTEXT}-image.tar"]
-    expire_in: 1 day
+    when: always
+    paths: ["${CONTEXT}-scan.json"]
+    expire_in: 30 days
 
 build:api:
   extends: .docker-build
@@ -79,33 +99,4 @@ build:web:
   extends: .docker-build
   variables:
     IMAGE: ${IMAGE_WEB}
-    CONTEXT: web
-
-# Scan the images this pipeline built (not the upstream base images) and fail
-# on fixable CRITICAL findings. web/.trivyignore documents accepted findings.
-.trivy-scan:
-  stage: scan
-  image:
-    name: aquasec/trivy:0.58.1
-    entrypoint: [""]
-  script:
-    - trivy image --input "${CONTEXT}-image.tar" --no-progress --ignore-unfixed
-        --ignorefile "${CONTEXT}/.trivyignore" --severity HIGH,CRITICAL --exit-code 0
-        --format json --output "${CONTEXT}-scan.json"
-    - trivy image --input "${CONTEXT}-image.tar" --no-progress --ignore-unfixed
-        --ignorefile "${CONTEXT}/.trivyignore" --severity CRITICAL --exit-code 1
-  artifacts:
-    when: always
-    paths: ["${CONTEXT}-scan.json"]
-
-scan:api:
-  extends: .trivy-scan
-  needs: [build:api]
-  variables:
-    CONTEXT: api
-
-scan:web:
-  extends: .trivy-scan
-  needs: [build:web]
-  variables:
     CONTEXT: web

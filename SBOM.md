@@ -92,7 +92,7 @@ for your deployment before shipping.
 - **Tailwind CSS**: MIT
 - **Recharts**: MIT
 - **PostgreSQL**: PostgreSQL License (permissive)
-- **Redis**: Not open source. Redis 7.4+ is dual-licensed RSALv2/SSPLv1 (source-available, not OSI-approved), and Redis 8+ adds AGPLv3 as a third option. This repo's `docker-compose.yml` uses `redis:7-alpine`; verify which license your deployed Redis image/version uses.
+- **Redis**: Licensing depends on the version. Up to 7.2.x: BSD-3-Clause. 7.4.x: RSALv2/SSPLv1 (source-available, not OSI-approved). 8.0+: RSALv2/SSPLv1/AGPLv3 (AGPLv3 is OSI-approved open source). This repo's `docker-compose.yml` uses `redis:7-alpine`; verify which license your deployed Redis image/version uses.
 
 ## Pinned Versions
 

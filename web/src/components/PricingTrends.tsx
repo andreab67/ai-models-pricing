@@ -46,7 +46,9 @@ export function PricingTrends() {
           ? "Price history for models you use via OpenRouter · last 30 days"
           : accountDataHidden
             ? "Price history for the current top-ranked coding models · last 30 days"
-            : "No OpenRouter usage yet — showing the current top-ranked coding models · last 30 days"}
+            : activityError
+              ? "Couldn't load your OpenRouter usage — showing the current top-ranked coding models · last 30 days"
+              : "No OpenRouter usage yet — showing the current top-ranked coding models · last 30 days"}
       </p>
 
       {isLoading && <p className="text-sm opacity-60">Loading…</p>}

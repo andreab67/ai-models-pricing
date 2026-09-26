@@ -21,6 +21,10 @@ _settings = get_settings()
 _SOCKET_TIMEOUT_S = 2.0
 _RECONNECT_BACKOFF_S = 30.0
 
+# Strong references to fire-and-forget close tasks so they are not garbage
+# collected before they run.
+_background_tasks: set[asyncio.Task[None]] = set()
+
 
 class Cache:
     """Async cache with Redis primary + in-memory fallback.
@@ -37,6 +41,7 @@ class Cache:
         self._next_connect_at = 0.0
         self._mem: dict[str, tuple[float, str]] = {}
         self._lock = asyncio.Lock()
+        self._connect_lock = asyncio.Lock()
 
     def _safe_url(self) -> str:
         return re.sub(r":[^@/]+@", ":***@", self._url)
@@ -47,33 +52,42 @@ class Cache:
         if client is not None:
             # Fire-and-forget close; a failing close must not mask the error.
             try:
-                asyncio.get_running_loop().create_task(client.aclose())
+                task = asyncio.get_running_loop().create_task(client.aclose())
             except RuntimeError:
-                pass
+                return
+            _background_tasks.add(task)
+            task.add_done_callback(_background_tasks.discard)
 
     async def _client_or_none(self) -> redis.Redis | None:
         if self._client is not None:
             return self._client
         if time.monotonic() < self._next_connect_at:
             return None
-        client = redis.from_url(
-            self._url,
-            decode_responses=True,
-            socket_connect_timeout=_SOCKET_TIMEOUT_S,
-            socket_timeout=_SOCKET_TIMEOUT_S,
-        )
-        try:
-            await client.ping()
-        except Exception as exc:
-            log.warning("redis_unavailable", url=self._safe_url(), error=str(exc))
-            self._next_connect_at = time.monotonic() + _RECONNECT_BACKOFF_S
+        # One connect attempt at a time; concurrent callers reuse its result
+        # instead of each opening (and leaking) their own client.
+        async with self._connect_lock:
+            if self._client is not None:
+                return self._client
+            if time.monotonic() < self._next_connect_at:
+                return None
+            client = redis.from_url(
+                self._url,
+                decode_responses=True,
+                socket_connect_timeout=_SOCKET_TIMEOUT_S,
+                socket_timeout=_SOCKET_TIMEOUT_S,
+            )
             try:
-                await client.aclose()
-            except Exception:  # noqa: S110 — best-effort cleanup
-                pass
-            return None
-        self._client = client
-        return client
+                await client.ping()
+            except Exception as exc:
+                log.warning("redis_unavailable", url=self._safe_url(), error=str(exc))
+                self._next_connect_at = time.monotonic() + _RECONNECT_BACKOFF_S
+                try:
+                    await client.aclose()
+                except Exception:  # noqa: S110 — best-effort cleanup
+                    pass
+                return None
+            self._client = client
+            return client
 
     async def redis_available(self) -> bool:
         """True only if Redis itself answers a PING right now (not the fallback)."""

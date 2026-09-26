@@ -12,7 +12,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import httpx
-from sqlalchemy import delete, exists, select
+from sqlalchemy import delete, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from tenacity import (
     AsyncRetrying,
@@ -37,7 +37,9 @@ OPENROUTER_MODELS_CACHE_KEY = "openrouter:models:normalized"
 # (job startup + fetch) where the key is gone and requests stampede upstream.
 CACHE_TTL_MULTIPLIER = 3
 
-_refresh_lock = asyncio.Lock()
+# Single-flight: concurrent cache misses await one shared refresh task, so a
+# failure is shared too instead of each waiter re-running the retry cycle.
+_inflight_refresh: asyncio.Task[list[ModelPricing]] | None = None
 
 
 def models_cache_ttl() -> int:
@@ -158,11 +160,11 @@ async def refresh_pricing(persist: bool = True) -> list[ModelPricing]:
 async def _persist(
     raw: list[dict[str, Any]], normalized: list[ModelPricing]
 ) -> None:
-    """Insert one snapshot per model per hour in a single statement.
+    """Insert one snapshot per model per hour in a single batched statement.
 
-    The refresh job runs several times an hour; once the current hour's
-    bucket exists, later runs skip the insert instead of issuing hundreds of
-    conflicting no-op rows.
+    The refresh job runs several times an hour; rows already present for the
+    current hour bucket are skipped by the unique constraint, and models that
+    were missing from an earlier run in the same hour are filled in.
     """
     if not normalized:
         return
@@ -170,12 +172,6 @@ async def _persist(
     raw_by_id = {r.get("id"): r for r in raw if isinstance(r, dict)}
 
     async with session_scope() as session:
-        already = await session.scalar(
-            select(exists().where(ModelPricingSnapshot.captured_at == now))
-        )
-        if already:
-            log.info("openrouter_persist_skipped", captured_at=now.isoformat())
-            return
         rows = [
             {
                 "model_id": m.id,
@@ -200,7 +196,7 @@ async def _persist(
             .on_conflict_do_nothing(constraint="uq_model_captured")
         )
         await session.execute(stmt)
-    log.info("openrouter_persist_ok", count=len(normalized))
+    log.info("openrouter_persist_ok", count=len(normalized), captured_at=now.isoformat())
 
 
 async def prune_snapshots() -> int:
@@ -222,20 +218,19 @@ async def prune_snapshots() -> int:
 async def list_models(use_cache: bool = True) -> list[ModelPricing]:
     """Public read path. Returns cached models or refreshes on miss.
 
-    Concurrent misses share one upstream fetch (single-flight): the first
-    caller refreshes while the rest wait on the lock and then read the
-    freshly cached value.
+    Concurrent misses share one upstream fetch: the first caller starts a
+    refresh task and every other caller awaits the same task (and gets the
+    same result or exception).
     """
+    global _inflight_refresh
     if use_cache:
         cached = await cache.get(OPENROUTER_MODELS_CACHE_KEY)
         if cached:
             return [ModelPricing.model_validate(c) for c in cached]
-    async with _refresh_lock:
-        if use_cache:
-            cached = await cache.get(OPENROUTER_MODELS_CACHE_KEY)
-            if cached:
-                return [ModelPricing.model_validate(c) for c in cached]
-        return await refresh_pricing(persist=False)
+    if _inflight_refresh is None or _inflight_refresh.done():
+        _inflight_refresh = asyncio.create_task(refresh_pricing(persist=False))
+    # shield: a cancelled request must not cancel the refresh others await.
+    return await asyncio.shield(_inflight_refresh)
 
 
 async def get_model(model_id: str) -> ModelPricing | None:
