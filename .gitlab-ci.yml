@@ -1,119 +1,111 @@
 stages:
-  - lint
-  - sast
-  - build
   - test
+  - build
+  - scan
 
 variables:
-  DOCKER_DRIVER: overlay2
-  REGISTRY: ${CI_REGISTRY}
-  IMAGE_API: ${REGISTRY}/${CI_PROJECT_PATH}/api
-  IMAGE_WEB: ${REGISTRY}/${CI_PROJECT_PATH}/web
+  # Push target; defaults to the registry the k8s manifests pull from.
+  # Pushing happens only when REGISTRY_USER and REGISTRY_PASSWORD are set.
+  IMAGE_REGISTRY: ghcr.io
+  IMAGE_API: ${IMAGE_REGISTRY}/andreab67/ai-models-pricing/api
+  IMAGE_WEB: ${IMAGE_REGISTRY}/andreab67/ai-models-pricing/web
 
-lint:web:
-  stage: lint
-  image: node:22-alpine
-  script:
-    - cd web
-    - npm install --frozen-lockfile
-    - npm run lint
-    - npm run typecheck
-  cache:
-    paths:
-      - web/node_modules/
-  only:
-    - merge_requests
-    - main
+workflow:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
 
-# SAST: Trivy scan API Dockerfile
-scan:api-trivy:
-  stage: sast
-  image: aquasec/trivy:latest
-  script:
-    - trivy image --severity HIGH,CRITICAL --exit-code 0 --no-progress --format json --output api-scan.json python:3.14-slim
-    - trivy image --severity HIGH,CRITICAL --exit-code 0 --no-progress --format sarif --output api-scan.sarif python:3.14-slim
-    - echo "✅ API base image (python:3.14-slim) scanned for vulnerabilities"
-  artifacts:
-    reports:
-      sast: api-scan.sarif
-    paths:
-      - api-scan.json
-      - api-scan.sarif
-  allow_failure: true
-  only:
-    - merge_requests
-    - main
-
-# SAST: Trivy scan Web Dockerfile
-scan:web-trivy:
-  stage: sast
-  image: aquasec/trivy:latest
-  script:
-    - trivy image --severity HIGH,CRITICAL --exit-code 0 --no-progress --format json --output web-scan.json node:22-alpine
-    - trivy image --severity HIGH,CRITICAL --exit-code 0 --no-progress --format sarif --output web-scan.sarif node:22-alpine
-    - echo "✅ Web base image (node:22-alpine) scanned for vulnerabilities"
-  artifacts:
-    reports:
-      sast: web-scan.sarif
-    paths:
-      - web-scan.json
-      - web-scan.sarif
-  allow_failure: true
-  only:
-    - merge_requests
-    - main
-
-# Build and push API image
-build:api:
-  stage: build
-  image: docker:24-dind
-  services:
-    - docker:24-dind
-  script:
-    - docker build -t ${IMAGE_API}:${CI_COMMIT_SHORT_SHA} -t ${IMAGE_API}:latest api/
-    - |
-      if [ "$CI_COMMIT_BRANCH" = "main" ]; then
-        echo "Building for main branch. To push, configure CI_REGISTRY_USER and CI_REGISTRY_PASSWORD in CI/CD variables."
-        echo "Then uncomment the docker login and push commands below."
-        # docker login -u ${CI_REGISTRY_USER} -p ${CI_REGISTRY_PASSWORD} ${REGISTRY}
-        # docker push ${IMAGE_API}:${CI_COMMIT_SHORT_SHA}
-        # docker push ${IMAGE_API}:latest
-      fi
-  only:
-    - merge_requests
-    - main
-
-# Build and push Web image
-build:web:
-  stage: build
-  image: docker:24-dind
-  services:
-    - docker:24-dind
-  script:
-    - docker build -t ${IMAGE_WEB}:${CI_COMMIT_SHORT_SHA} -t ${IMAGE_WEB}:latest web/
-    - |
-      if [ "$CI_COMMIT_BRANCH" = "main" ]; then
-        echo "Building for main branch. To push, configure CI_REGISTRY_USER and CI_REGISTRY_PASSWORD in CI/CD variables."
-        echo "Then uncomment the docker login and push commands below."
-        # docker login -u ${CI_REGISTRY_USER} -p ${CI_REGISTRY_PASSWORD} ${REGISTRY}
-        # docker push ${IMAGE_WEB}:${CI_COMMIT_SHORT_SHA}
-        # docker push ${IMAGE_WEB}:latest
-      fi
-  only:
-    - merge_requests
-    - main
-
-# Test database schema with alembic (validates FastAPI + Starlette compatibility)
-test:db-migrations:
+test:api:
   stage: test
   image: python:3.14-slim
   script:
     - cd api
     - pip install --no-cache-dir -e ".[dev]"
-    # Verify Starlette is properly installed (respects pyproject.toml constraints)
-    - python -c "import starlette; print(f'Starlette {starlette.__version__} installed')"
-    - alembic upgrade head --sql
-    - echo "✅ Database schema migrations validated"
-  only:
-    - merge_requests
-    - main
+    - ruff check .
+    - mypy app
+    - pytest -q
+    - alembic upgrade head --sql > /dev/null
+
+test:web:
+  stage: test
+  image: node:22-alpine
+  script:
+    - cd web
+    - npm ci --no-audit --no-fund
+    - npm run lint
+    - npm run typecheck
+  cache:
+    key:
+      files: [web/package-lock.json]
+    paths: [web/.npm/]
+  variables:
+    npm_config_cache: "$CI_PROJECT_DIR/web/.npm"
+
+.docker-build:
+  stage: build
+  image: docker:27
+  services:
+    - docker:27-dind
+  variables:
+    DOCKER_HOST: tcp://docker:2376
+    DOCKER_TLS_CERTDIR: "/certs"
+    DOCKER_TLS_VERIFY: "1"
+    DOCKER_CERT_PATH: "/certs/client"
+  script:
+    - docker build -t "${IMAGE}:${CI_COMMIT_SHORT_SHA}" "${CONTEXT}"
+    - docker save -o "${CONTEXT}-image.tar" "${IMAGE}:${CI_COMMIT_SHORT_SHA}"
+    - |
+      if [ -n "${REGISTRY_USER:-}" ] && [ -n "${REGISTRY_PASSWORD:-}" ]; then
+        echo "$REGISTRY_PASSWORD" | docker login -u "$REGISTRY_USER" --password-stdin "$IMAGE_REGISTRY"
+        docker push "${IMAGE}:${CI_COMMIT_SHORT_SHA}"
+        if [ "$CI_COMMIT_BRANCH" = "$CI_DEFAULT_BRANCH" ]; then
+          docker tag "${IMAGE}:${CI_COMMIT_SHORT_SHA}" "${IMAGE}:latest"
+          docker push "${IMAGE}:latest"
+        fi
+      else
+        echo "REGISTRY_USER/REGISTRY_PASSWORD not set: image built and scanned, not pushed."
+      fi
+  artifacts:
+    paths: ["${CONTEXT}-image.tar"]
+    expire_in: 1 day
+
+build:api:
+  extends: .docker-build
+  variables:
+    IMAGE: ${IMAGE_API}
+    CONTEXT: api
+
+build:web:
+  extends: .docker-build
+  variables:
+    IMAGE: ${IMAGE_WEB}
+    CONTEXT: web
+
+# Scan the images this pipeline built (not the upstream base images) and fail
+# on fixable CRITICAL findings. web/.trivyignore documents accepted findings.
+.trivy-scan:
+  stage: scan
+  image:
+    name: aquasec/trivy:0.58.1
+    entrypoint: [""]
+  script:
+    - trivy image --input "${CONTEXT}-image.tar" --no-progress --ignore-unfixed
+        --ignorefile "${CONTEXT}/.trivyignore" --severity HIGH,CRITICAL --exit-code 0
+        --format json --output "${CONTEXT}-scan.json"
+    - trivy image --input "${CONTEXT}-image.tar" --no-progress --ignore-unfixed
+        --ignorefile "${CONTEXT}/.trivyignore" --severity CRITICAL --exit-code 1
+  artifacts:
+    when: always
+    paths: ["${CONTEXT}-scan.json"]
+
+scan:api:
+  extends: .trivy-scan
+  needs: [build:api]
+  variables:
+    CONTEXT: api
+
+scan:web:
+  extends: .trivy-scan
+  needs: [build:web]
+  variables:
+    CONTEXT: web

@@ -8,7 +8,9 @@ data:
   CORS_ORIGINS: '["https://models.andrea-house.com"]'
   REDIS_URL: redis://redis.redis.svc.cluster.local:6379/0
   OPENROUTER_BASE_URL: https://openrouter.ai/api/v1
+  # Matches the refresh-pricing CronJob (*/5); the models cache lives 3x this.
   OPENROUTER_REFRESH_SECONDS: "300"
+  SNAPSHOT_RETENTION_DAYS: "90"
   CACHE_TTL_SECONDS: "300"
   SMTP_HOST: email-smtp.us-east-1.amazonaws.com
   SMTP_PORT: "465"

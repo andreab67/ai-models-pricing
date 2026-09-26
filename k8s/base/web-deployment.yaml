@@ -21,7 +21,7 @@ spec:
       containers:
         - name: web
           image: ghcr.io/andreab67/ai-models-pricing/web:latest
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: Always
           ports:
             - { containerPort: 3000, name: http }
           env:
@@ -31,6 +31,10 @@ spec:
               value: "3000"
             - name: HOSTNAME
               value: "0.0.0.0"
+            # Forward /api/accounts/* (real spend and credit) only when the
+            # site is behind authentication. Default: not exposed.
+            - name: EXPOSE_ACCOUNT_DATA
+              value: "false"
           resources:
             requests: { cpu: 50m,  memory: 128Mi }
             limits:   { cpu: 500m, memory: 384Mi }
@@ -44,14 +48,16 @@ spec:
             periodSeconds: 20
           securityContext:
             allowPrivilegeEscalation: false
-            readOnlyRootFilesystem: false  # next standalone writes .next/cache at runtime
+            readOnlyRootFilesystem: true
             capabilities: { drop: ["ALL"] }
----
-apiVersion: policy/v1
-kind: PodDisruptionBudget
-metadata:
-  name: web
-spec:
-  minAvailable: 0
-  selector:
-    matchLabels: { app: web }
+          volumeMounts:
+            # next standalone writes its image/fetch cache under .next/cache
+            - name: next-cache
+              mountPath: /app/.next/cache
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: next-cache
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}

@@ -29,7 +29,6 @@ spec:
           envFrom:
             - configMapRef: { name: model-pricing-config }
             - secretRef:    { name: model-pricing-secrets }
-            - secretRef:    { name: ses-creds }
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
@@ -43,7 +42,6 @@ spec:
           envFrom:
             - configMapRef: { name: model-pricing-config }
             - secretRef:    { name: model-pricing-secrets }
-            - secretRef:    { name: ses-creds }
           resources:
             requests: { cpu: 100m, memory: 192Mi }
             limits:   { cpu: 1,    memory: 512Mi }
@@ -66,12 +64,3 @@ spec:
       volumes:
         - name: tmp
           emptyDir: {}
----
-apiVersion: policy/v1
-kind: PodDisruptionBudget
-metadata:
-  name: api
-spec:
-  minAvailable: 0
-  selector:
-    matchLabels: { app: api }
