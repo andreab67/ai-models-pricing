@@ -229,6 +229,9 @@ async def list_models(use_cache: bool = True) -> list[ModelPricing]:
             return [ModelPricing.model_validate(c) for c in cached]
     if _inflight_refresh is None or _inflight_refresh.done():
         _inflight_refresh = asyncio.create_task(refresh_pricing(persist=False))
+        # Mark the exception as retrieved even if every waiter was cancelled,
+        # so asyncio does not log "Task exception was never retrieved".
+        _inflight_refresh.add_done_callback(lambda t: t.cancelled() or t.exception())
     # shield: a cancelled request must not cancel the refresh others await.
     return await asyncio.shield(_inflight_refresh)
 

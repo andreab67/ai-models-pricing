@@ -104,9 +104,12 @@ const accountConfig: SWRConfiguration = {
   ...defaultConfig,
   onErrorRetry: (error, _key, config, revalidate, { retryCount }) => {
     if (error instanceof ApiError && error.status === 404) return;
-    if (retryCount >= 5) return;
+    // Keep retrying other errors (SWR pauses interval polling while an error
+    // is set, so giving up would leave the panel stale until reload), with
+    // exponential backoff capped at 5 minutes.
     const base = config.errorRetryInterval ?? 5_000;
-    setTimeout(() => revalidate({ retryCount }), base * 2 ** retryCount);
+    const delay = Math.min(base * 2 ** retryCount, 300_000);
+    setTimeout(() => revalidate({ retryCount, dedupe: true }), delay);
   },
 };
 
