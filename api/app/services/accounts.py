@@ -19,6 +19,9 @@ _settings = get_settings()
 
 _CACHE_KEY = "accounts:usage"
 _CACHE_TTL = 120  # 2 min — balance data should be fairly fresh
+# A transient upstream error is cached only briefly, so one 5xx does not
+# blank the widgets for the full TTL (but we still don't hammer upstream).
+_FAILURE_CACHE_TTL = 30
 
 
 def _num(v: object) -> float:
@@ -162,6 +165,7 @@ async def get_activity() -> ActivityResponse:
         "order_by": {"field": "total_usage", "direction": "desc"},
     }
 
+    ok = False
     async with httpx.AsyncClient(timeout=20.0) as client:
         try:
             resp = await client.post(
@@ -194,11 +198,16 @@ async def get_activity() -> ActivityResponse:
                 )
             items.sort(key=lambda x: x.cost_usd, reverse=True)
             result = ActivityResponse(items=items, fetched_at=datetime.now(UTC))
+            ok = True
         except Exception as exc:
             log.warning("openrouter_activity_failed", error=str(exc))
             result = ActivityResponse(items=[], fetched_at=datetime.now(UTC))
 
-    await cache.set(_ACTIVITY_CACHE_KEY, result.model_dump(mode="json"), ttl=_ACTIVITY_CACHE_TTL)
+    await cache.set(
+        _ACTIVITY_CACHE_KEY,
+        result.model_dump(mode="json"),
+        ttl=_ACTIVITY_CACHE_TTL if ok else _FAILURE_CACHE_TTL,
+    )
     return result
 
 
@@ -216,5 +225,10 @@ async def get_usage() -> AccountsUsage:
         kilo=kilo,
         fetched_at=datetime.now(UTC),
     )
-    await cache.set(_CACHE_KEY, result.model_dump(mode="json"), ttl=_CACHE_TTL)
+    any_error = any(p.error for p in (openrouter, kilo))
+    await cache.set(
+        _CACHE_KEY,
+        result.model_dump(mode="json"),
+        ttl=_FAILURE_CACHE_TTL if any_error else _CACHE_TTL,
+    )
     return result

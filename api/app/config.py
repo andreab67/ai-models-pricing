@@ -29,7 +29,11 @@ class Settings(BaseSettings):
     openrouter_base_url: str = Field(default="https://openrouter.ai/api/v1")
     openrouter_models_path: str = Field(default="/models")
     openrouter_timeout_s: float = Field(default=15.0)
+    # Expected interval between refresh-pricing runs; the models cache lives
+    # 3x this long so it never expires between runs.
     openrouter_refresh_seconds: int = Field(default=900)  # 15 min
+    # Hourly snapshots older than this are pruned by the refresh job (0 = keep).
+    snapshot_retention_days: int = Field(default=90)
 
     # --- kilo -------------------------------------------------------------
     kilo_plans_path: Path = Field(default=Path(__file__).parent / "data" / "kilo_plans.yaml")
