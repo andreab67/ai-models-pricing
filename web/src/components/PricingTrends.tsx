@@ -1,19 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import {
-  CartesianGrid,
-  Legend,
-  Line,
-  LineChart,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
 
-import { fmtUsd, useHistory, useTopModels } from "@/lib/api";
-import { CHART_BLUE, CHART_GREEN } from "@/lib/chartColors";
+import { PriceHistoryChart } from "@/components/PriceHistoryChart";
+import { useHistory, useTopModels } from "@/lib/api";
 
 export function PricingTrends() {
   const { data: ranked, isLoading } = useTopModels(10);
@@ -23,16 +13,6 @@ export function PricingTrends() {
   const modelId = selectedModel ?? models[0]?.model.id ?? null;
 
   const { data: history } = useHistory(modelId, 30);
-
-  const chartData =
-    history?.map((h) => ({
-      date: new Date(h.captured_at).toLocaleDateString("en-US", {
-        month: "short",
-        day: "numeric",
-      }),
-      input: h.prompt_usd_per_mtok,
-      output: h.completion_usd_per_mtok,
-    })) ?? [];
 
   return (
     <section className="card rounded-lg p-4 w-full">
@@ -53,6 +33,7 @@ export function PricingTrends() {
                   key={r.model.id}
                   type="button"
                   onClick={() => setSelectedModel(r.model.id)}
+                  aria-pressed={active}
                   className={`rounded px-3 py-1 text-xs font-medium transition-colors ${
                     active
                       ? "bg-blue-600 text-white"
@@ -65,44 +46,9 @@ export function PricingTrends() {
             })}
           </div>
 
-          {chartData.length > 1 ? (
+          {history && history.length > 1 ? (
             <div className="h-72">
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={chartData}>
-                  <CartesianGrid stroke="rgb(var(--border))" strokeDasharray="3 3" />
-                  <XAxis dataKey="date" stroke="rgb(var(--muted))" fontSize={11} />
-                  <YAxis
-                    stroke="rgb(var(--muted))"
-                    fontSize={11}
-                    tickFormatter={(v: number) => `$${v}`}
-                  />
-                  <Tooltip
-                    formatter={(v: number) => fmtUsd(v)}
-                    contentStyle={{
-                      background: "rgb(var(--card))",
-                      border: "1px solid rgb(var(--border))",
-                      color: "rgb(var(--fg))",
-                    }}
-                  />
-                  <Legend />
-                  <Line
-                    type="monotone"
-                    dataKey="input"
-                    name="In $/Mtok"
-                    stroke={CHART_BLUE}
-                    dot={false}
-                    strokeWidth={2}
-                  />
-                  <Line
-                    type="monotone"
-                    dataKey="output"
-                    name="Out $/Mtok"
-                    stroke={CHART_GREEN}
-                    dot={false}
-                    strokeWidth={2}
-                  />
-                </LineChart>
-              </ResponsiveContainer>
+              <PriceHistoryChart history={history} strokeWidth={2} />
             </div>
           ) : (
             <p className="text-sm opacity-60">

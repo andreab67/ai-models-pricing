@@ -26,10 +26,10 @@ spec:
         - name: migrate
           image: gitlab.andrea-house.com:5050/root/model-pricing/api:latest
           command: ["alembic", "upgrade", "head"]
+          # No ses-creds: only the mail-sending CronJobs need SMTP credentials.
           envFrom:
             - configMapRef: { name: model-pricing-config }
             - secretRef:    { name: model-pricing-secrets }
-            - secretRef:    { name: ses-creds }
           resources:
             requests: { cpu: 50m, memory: 128Mi }
             limits:   { cpu: 500m, memory: 384Mi }
@@ -46,7 +46,6 @@ spec:
           envFrom:
             - configMapRef: { name: model-pricing-config }
             - secretRef:    { name: model-pricing-secrets }
-            - secretRef:    { name: ses-creds }
           resources:
             requests: { cpu: 100m, memory: 192Mi }
             limits:   { cpu: 1,    memory: 512Mi }
