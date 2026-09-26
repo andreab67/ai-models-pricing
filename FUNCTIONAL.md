@@ -9,9 +9,9 @@ The AI Model Pricing Dashboard is a production-grade system for real-time tracki
 ### 1. Real-Time Pricing Aggregation
 
 - **Multi-provider catalog**: Unified view of 100+ models across OpenRouter, OpenAI, Anthropic, and Kilo
-- **Automatic refresh**: Pricing updates every 15 minutes via CronJob at zero cost (OpenRouter `/models` is public)
-- **Redis caching**: TTL-based caching (900 seconds) for rapid responses
-- **History tracking**: Postgres persistence for 30+ days of historical snapshots enabling trend analysis
+- **Automatic refresh**: Pricing updates via the `refresh-pricing` CronJob at zero cost (OpenRouter `/models` is public); cadence is `OPENROUTER_REFRESH_SECONDS` (every 5 minutes in the shipped k8s config), and the CronJob schedule must match it
+- **Redis caching**: the models cache TTL is `3 × OPENROUTER_REFRESH_SECONDS` so it never expires between refresh runs (2700s with the local default of 900s; 900s in prod, since the refresh interval there is 300s); falls back to in-process memory if Redis is unreachable
+- **History tracking**: Postgres persistence of hourly pricing snapshots (pruned after `SNAPSHOT_RETENTION_DAYS`, default 90) enabling trend analysis
 
 ### 2. Intelligent Model Ranking
 
@@ -28,14 +28,14 @@ The AI Model Pricing Dashboard is a production-grade system for real-time tracki
 
 Compare the same model across four distinct purchasing channels:
 
-- **OpenRouter PAYG**: Pay-as-you-go pricing, per-request billing
-- **OpenRouter BYOK**: Bring-your-own-key (user API key) pricing
-- **Kilo Pass**: Kilo AI Gateway subscription with tier-based pricing (Basic, Pro, Enterprise)
-- **Kilo BYOK**: Kilo subscription with customer-supplied model credentials
+- **OpenRouter PAYG**: Pay-as-you-go pricing, plus the credit-purchase fee
+- **OpenRouter BYOK**: Bring-your-own-key (user API key) pricing, plus the BYOK fee
+- **Kilo Pass**: Kilo AI Gateway subscription with tier-based pricing (starter, pro, expert)
+- **Kilo BYOK**: Kilo subscription with customer-supplied model credentials (true passthrough, no markup)
 
 ### 4. Kilo AI Gateway Integration
 
-- **Tier management**: Static tier definitions (Basic, Pro, Enterprise) with pricing rules
+- **Tier management**: Static tier definitions (starter, pro, expert) with pricing rules
 - **Streak bonuses**: Volume-based discounts calculated from consecutive months at tier
 - **Annual prepayment**: Optional annual payment option with discount calculation
 - **Live model availability**: Query Kilo's model catalog in real-time
@@ -43,11 +43,13 @@ Compare the same model across four distinct purchasing channels:
 
 ### 5. Account Balance & Spend Tracking
 
-- **OpenAI integration**: Current billing cycle spend and remaining credit balance
-- **Anthropic integration**: Account balance and recent cost activity
+- **OpenRouter integration**: Credit balance (limit/spent/remaining) via `/credits`
+- **OpenAI integration**: Last-30-day spend via the Admin Costs API (no balance endpoint; validates the key)
+- **Anthropic integration**: Last-30-day spend via the Admin cost report (no balance endpoint; validates the key)
+- **Kilo integration**: Key validation and available model count (no spend/balance endpoint)
 - **OpenRouter activity**: Per-model usage tracking (last 30 days) with request counts and token volumes
-- **Real-time updates**: Fetch on-demand without caching to ensure accuracy
-- **Cost breakdown by model**: Aggregate spending across models for workload analysis
+- **OpenAI activity**: Per-model cost breakdown (last 30 days) via the cost report's `group_by=line_item`
+- **Caching**: `/accounts/usage` is cached ~2 minutes (30s on upstream error); `/accounts/activity` and `/accounts/openai-activity` are cached ~15 minutes
 
 ### 6. Historical Trend Analysis
 
@@ -69,8 +71,8 @@ Compare the same model across four distinct purchasing channels:
 | Endpoint | Method | Response | Purpose |
 |----------|--------|----------|---------|
 | `GET /healthz` | GET | `{"status": "ok"}` | Kubernetes liveness probe |
-| `GET /readyz` | GET | `{"status": "ok"}` | Kubernetes readiness probe (checks DB + Redis connectivity) |
-| `GET /metrics` | GET | Prometheus text format | Prometheus metrics (request count, latency, errors) |
+| `GET /readyz` | GET | `{"db": true, "redis": true, "ready": true}` | Kubernetes readiness probe — 503 if Postgres is unreachable; Redis is reported honestly but does not gate readiness (the cache falls back to in-process memory) |
+| `GET /metrics` | GET | Prometheus text format | Prometheus metrics (request count, latency by method/route/status) |
 
 ### Models
 
@@ -90,20 +92,23 @@ Compare the same model across four distinct purchasing channels:
   "provider": "anthropic",
   "prompt_usd_per_mtok": 3.0,
   "completion_usd_per_mtok": 15.0,
+  "request_usd": 0.0,
+  "image_usd": 0.0,
   "context_length": 200000,
   "max_completion_tokens": 4096,
   "supports_tools": true,
   "supports_vision": true,
-  "cached_at": "2026-05-27T08:30:00Z"
+  "captured_at": "2026-05-27T08:30:00Z"
 }
 ```
 
-**Response Schema: RankedModel** (extends ModelPricing)
+**Response Schema: RankedModel**
 ```json
 {
-  "rank": 1,
+  "model": { ...ModelPricing... },
+  "score": 88.0,
   "blended_usd_per_mtok": 12.0,
-  "model": { ...ModelPricing... }
+  "rank": 1
 }
 ```
 
@@ -113,6 +118,8 @@ Compare the same model across four distinct purchasing channels:
 |----------|--------|------------------|----------|---------|
 | `GET /compare/{model_id}` | GET | `kilo_tier=pro&kilo_streak_months=8&kilo_annual=false` | `ModelComparison` | Compare pricing across 4 channels |
 
+`kilo_tier` must be one of `starter`/`pro`/`expert`; an unknown tier returns **422**. 404 if `model_id` is not found.
+
 **Response Schema: ModelComparison**
 ```json
 {
@@ -120,17 +127,28 @@ Compare the same model across four distinct purchasing channels:
   "channels": [
     {
       "channel": "openrouter_payg",
-      "prompt_usd_per_mtok": 2.7,
-      "completion_usd_per_mtok": 13.5,
-      "notes": "Effective rate from OpenRouter"
+      "prompt_usd_per_mtok": 2.85,
+      "completion_usd_per_mtok": 14.25,
+      "notes": "+5.5% credit purchase fee"
+    },
+    {
+      "channel": "openrouter_byok",
+      "prompt_usd_per_mtok": 2.82,
+      "completion_usd_per_mtok": 14.10,
+      "notes": "+5.0% past 1M reqs/mo"
     },
     {
       "channel": "kilo_pass",
       "prompt_usd_per_mtok": 2.1,
       "completion_usd_per_mtok": 10.5,
-      "notes": "Pro tier with 8-month streak bonus"
+      "notes": "tier=pro, month 8, 30.0% effective discount"
+    },
+    {
+      "channel": "kilo_byok",
+      "prompt_usd_per_mtok": 3.0,
+      "completion_usd_per_mtok": 15.0,
+      "notes": "true passthrough"
     }
-    // ...more channels...
   ]
 }
 ```
@@ -139,21 +157,22 @@ Compare the same model across four distinct purchasing channels:
 
 | Endpoint | Method | Query Parameters | Response | Purpose |
 |----------|--------|------------------|----------|---------|
-| `GET /kilo/plans` | GET | — | `[KiloPlan]` | All Kilo subscription tiers |
+| `GET /kilo/plans` | GET | — | `[KiloPlan]` | All Kilo subscription tiers (from `api/app/data/kilo_plans.yaml`) |
 | `GET /kilo/models` | GET | — | `[ModelPricing]` | Models available on Kilo |
 | `GET /kilo/models/{model_id}` | GET | — | `ModelPricing` | Single Kilo model |
 | `GET /kilo/projection` | GET | `tier=pro&streak_months=8&annual=false` | `KiloProjection` | Cost projection and effective rates |
+
+`tier` must be one of `starter`/`pro`/`expert`; an unknown tier returns **422**.
 
 **Response Schema: KiloPlan**
 ```json
 {
   "tier": "pro",
-  "base_usd_per_mtok_in": 2.0,
-  "base_usd_per_mtok_out": 10.0,
-  "monthly_credits": 10000000,
-  "streak_bonus_percent": 0.15,
-  "annual_discount_percent": 0.08,
-  "description": "Professional tier for production workloads"
+  "monthly_usd": 49.0,
+  "paid_credits_usd": 49.0,
+  "max_bonus_pct": 0.40,
+  "annual_usd": 588.0,
+  "annual_bonus_pct": 0.50
 }
 ```
 
@@ -161,14 +180,11 @@ Compare the same model across four distinct purchasing channels:
 ```json
 {
   "tier": "pro",
-  "base_monthly_cost": 100,
   "streak_months": 8,
-  "streak_bonus_percent": 15,
-  "applied_bonus_usd": 15,
-  "annual_discount_percent": 8,
-  "monthly_effective_cost": 78.2,
-  "effective_rate_in": 1.7,
-  "effective_rate_out": 8.5
+  "paid_credits_usd": 49.0,
+  "bonus_pct": 0.40,
+  "bonus_credits_usd": 19.6,
+  "total_effective_credits_usd": 68.6
 }
 ```
 
@@ -176,48 +192,74 @@ Compare the same model across four distinct purchasing channels:
 
 | Endpoint | Method | Response | Purpose |
 |----------|--------|----------|---------|
-| `GET /accounts/usage` | GET | `AccountsUsage` | Current-month spend + remaining credits (OpenAI, Anthropic) |
+| `GET /accounts/usage` | GET | `AccountsUsage` | Status for OpenRouter, Kilo, OpenAI and Anthropic (balance where available, else 30-day spend) |
 | `GET /accounts/activity` | GET | `ActivityResponse` | Per-model usage from OpenRouter (last 30 days) |
 | `GET /accounts/openai-activity` | GET | `ActivityResponse` | Per-model costs from OpenAI (last 30 days) |
 
 **Response Schema: AccountsUsage**
 ```json
 {
-  "accounts": [
-    {
-      "provider": "openai",
-      "spent_usd": 523.45,
-      "remaining_credit_usd": 1476.55,
-      "subscription_active": true,
-      "usage_limit_usd": 2000
-    },
-    {
-      "provider": "anthropic",
-      "spent_usd": 234.12,
-      "remaining_credit_usd": 765.88,
-      "subscription_active": true,
-      "usage_limit_usd": 1000
-    }
-  ]
+  "openrouter": {
+    "provider": "openrouter",
+    "configured": true,
+    "plan": null,
+    "limit_usd": 500.0,
+    "spent_usd": 123.45,
+    "remaining_usd": 376.55,
+    "period_start": null,
+    "model_count": null,
+    "error": null
+  },
+  "kilo": {
+    "provider": "kilo",
+    "configured": true,
+    "plan": "Pro $49/mo",
+    "limit_usd": 49.0,
+    "spent_usd": null,
+    "remaining_usd": null,
+    "period_start": null,
+    "model_count": 42,
+    "error": null
+  },
+  "openai": {
+    "provider": "openai",
+    "configured": true,
+    "plan": null,
+    "limit_usd": null,
+    "spent_usd": 523.45,
+    "remaining_usd": null,
+    "period_start": "Aug 27",
+    "model_count": null,
+    "error": null
+  },
+  "anthropic": {
+    "provider": "anthropic",
+    "configured": true,
+    "plan": null,
+    "limit_usd": null,
+    "spent_usd": 234.12,
+    "remaining_usd": null,
+    "period_start": "Aug 27",
+    "model_count": null,
+    "error": null
+  },
+  "fetched_at": "2026-09-26T08:30:00Z"
 }
 ```
 
 **Response Schema: ActivityResponse**
 ```json
 {
-  "provider": "openrouter",
-  "period_days": 30,
-  "total_spend_usd": 1250.50,
   "items": [
     {
       "model_id": "anthropic/claude-3.5-sonnet",
-      "cost_usd": 450.25,
       "requests": 1250,
       "prompt_tokens": 15000000,
-      "completion_tokens": 5000000
+      "completion_tokens": 5000000,
+      "cost_usd": 450.25
     }
-    // ...more models...
-  ]
+  ],
+  "fetched_at": "2026-09-26T08:30:00Z"
 }
 ```
 
@@ -227,7 +269,7 @@ Compare the same model across four distinct purchasing channels:
 
 1. **Main Dashboard**
    - Top 10 coding models ranked by blended cost
-   - Quick glance at current month spend across providers
+   - Quick glance at last-30-day spend across providers
    - Live pricing for selected model
    - Model comparison side-by-side across channels
 
@@ -254,9 +296,8 @@ Compare the same model across four distinct purchasing channels:
 
 ### Real-Time Updates
 
-- **SWR polling**: Frontend fetches `/models/top` every 60 seconds
-- **Activity refresh**: User can manually trigger account balance checks
-- **Responsive cache handling**: 404s and stale data gracefully handled
+- **SWR polling**: Model/pricing/account-usage queries refresh every 5 minutes; account activity every 15 minutes (no polling on window focus)
+- **404 handling**: An `/accounts/*` 404 is treated as "not exposed by the web proxy" (`EXPOSE_ACCOUNT_DATA` is off) rather than an error
 - **Dark mode**: Synchronized with system preference, user-overridable
 
 ## Data Models
@@ -269,16 +310,18 @@ Compare the same model across four distinct purchasing channels:
 - `provider`: Provider identifier
 - `prompt_usd_per_mtok`: Input price per 1M tokens
 - `completion_usd_per_mtok`: Output price per 1M tokens
+- `request_usd` / `image_usd`: Per-request / per-image surcharge, if any
 - `context_length`: Maximum input context in tokens
 - `max_completion_tokens`: Maximum output tokens
 - `supports_tools`: Boolean (function calling)
 - `supports_vision`: Boolean (image input)
-- `cached_at`: ISO timestamp of pricing capture
+- `captured_at`: ISO timestamp of pricing capture
 
 **RankedModel**
-- Extends ModelPricing with:
-- `rank`: Integer ranking (1 = lowest blended cost)
+- `model`: ModelPricing object
+- `score`: 0–100, higher is better (`100 - blended_usd_per_mtok`, floored at 0)
 - `blended_usd_per_mtok`: Weighted cost metric
+- `rank`: Integer ranking (1 = lowest blended cost)
 
 **ModelComparison**
 - `model`: ModelPricing object
@@ -293,51 +336,56 @@ Compare the same model across four distinct purchasing channels:
 ## Scheduled Jobs (CronJobs)
 
 ### refresh-pricing
-- **Schedule**: Every 15 minutes
-- **Action**: Fetch `/models` from OpenRouter, normalize pricing, persist to Postgres, update Redis cache
+- **Schedule**: Every 5 minutes (`*/5 * * * *`), matching `OPENROUTER_REFRESH_SECONDS=300` in the shipped config
+- **Action**: Fetch `/models` from OpenRouter, normalize pricing, persist to Postgres, update Redis cache, prune snapshots older than `SNAPSHOT_RETENTION_DAYS`
 - **Cost**: Free (OpenRouter endpoint is public)
-- **Failure handling**: Retry with exponential backoff; log and alert on persistent failures
+- **Failure handling**: Retries the OpenRouter fetch up to 3 times with exponential backoff; a run that still fails logs the error and exits non-zero
 
 ### daily-report
-- **Schedule**: Daily (default 9 AM UTC)
+- **Schedule**: Daily at 8:00 AM America/Denver (`spec.timeZone`)
 - **Action**: Compute savings projections, send email summary to stakeholders
-- **Customization**: Baseline model and usage figures configurable
+- **Customization**: Baseline model ID and monthly token assumptions are constants in `daily_report.py` (not env vars)
 
 ### kilo-diff
-- **Schedule**: Daily
-- **Action**: Compare previous Kilo pricing snapshot with current; alert on changes
+- **Schedule**: Weekly, Mondays at 07:00 America/Denver
+- **Action**: Hash the live kilo.ai/pricing page and compare against the last hash stored in Postgres (`kilo_plan_snapshot` table, not Redis); alert by email on changes
 - **Purpose**: Early detection of pricing or tier definition changes
 
 ## Environment Configuration
 
 ### Required
 
-- `DATABASE_URL`: PostgreSQL connection (async driver)
-- `REDIS_URL`: Redis endpoint with optional password
+- `DATABASE_URL`: PostgreSQL connection using the `postgresql+psycopg` (psycopg 3) driver
+- `REDIS_URL`: Redis endpoint with optional password (optional in practice — the cache falls back to in-process memory if Redis is unreachable)
 
 ### Optional (for features)
 
-- `OPENAI_ADMIN_KEY`: OpenAI API key for balance/spend tracking
-- `ANTHROPIC_ADMIN_KEY`: Anthropic API key for balance tracking
-- `OPENROUTER_API_KEY`: OpenRouter key (for authenticated endpoints)
+- `OPENAI_ADMIN_KEY` / `OPENAI_API_KEY`: OpenAI key for spend tracking / key validation
+- `ANTHROPIC_ADMIN_KEY` / `ANTHROPIC_API_KEY`: Anthropic key for spend tracking / key validation
+- `OPENROUTER_API_KEY`: OpenRouter key (for `/credits` and `/activity`)
 - `KILO_API_KEY`: Kilo API credentials
+- `KILO_TIER`: Active Kilo tier — `starter` / `pro` / `expert` (default `starter`)
 - `SMTP_*`: Email configuration for daily reports
 
 ### Tuning
 
-- `RANK_INPUT_WEIGHT`: Weight for input cost in blended metric (default 0.30)
-- `RANK_OUTPUT_WEIGHT`: Weight for output cost in blended metric (default 0.70)
+- `RANK_INPUT_WEIGHT` / `RANK_OUTPUT_WEIGHT`: Weights for the blended cost metric (default 0.30 / 0.70)
 - `RANK_MIN_CONTEXT_TOKENS`: Minimum context window filter (default 1,000,000)
-- `CACHE_TTL_SECONDS`: Redis cache duration (default 900)
+- `RANK_MAX_INPUT_PRICE` / `RANK_MAX_OUTPUT_PRICE`: Cost bounds in USD/Mtok (default 10.0 / 40.0)
+- `RANK_TOP_N`: Default size of `/models/top` (default 10)
+- `OPENROUTER_REFRESH_SECONDS`: Expected interval between `refresh-pricing` runs (default 900; the models cache TTL is 3x this)
+- `SNAPSHOT_RETENTION_DAYS`: Hourly snapshot retention before pruning (default 90; 0 disables pruning)
+- `CACHE_TTL_SECONDS`: Default Redis cache duration outside the models cache (default 900)
 
 ## Security & Compliance
 
 - **No secrets in code**: All credentials injected via environment or Kubernetes secrets
-- **HTTPS/TLS**: Ingress configured with cert-manager for automatic renewal
-- **CORS**: Configured to allow same-origin frontend requests
-- **Admin key separation**: Admin-level endpoints (if present) validated against separate credentials
-- **Audit trail**: All API requests logged with timestamps and response codes
-- **Data retention**: Configurable historical snapshot retention (default 90 days)
+- **HTTPS/TLS**: Traefik ingress terminates TLS from a secret you provide — no cert-manager wiring is included in this repo
+- **CORS**: Restricted to the origins in `CORS_ORIGINS`
+- **Admin key separation**: `OPENAI_ADMIN_KEY`/`ANTHROPIC_ADMIN_KEY` (cost reporting) are distinct from `OPENAI_API_KEY`/`ANTHROPIC_API_KEY` (key validation only)
+- **Account data gating**: the web proxy (`route.ts`) forwards `/accounts/*` only when `EXPOSE_ACCOUNT_DATA=true`; `/metrics`, `/docs`, and `?refresh=` are never forwarded regardless
+- **Request logging**: Structured JSON logs (structlog) plus Prometheus request/latency metrics; no per-user identity is captured
+- **Data retention**: Configurable historical snapshot retention (default 90 days via `SNAPSHOT_RETENTION_DAYS`)
 
 ## Performance Characteristics
 
@@ -345,9 +393,8 @@ Compare the same model across four distinct purchasing channels:
   - Cached endpoints: <100ms
   - History queries: <500ms (Postgres index on model_id, date)
   - Comparison computation: <250ms (in-memory calculation)
-- **Throughput**: 1000+ req/s per API pod (tuned for 2–3 replicas)
 - **Memory**: ~300MB per API pod, ~200MB per web pod
-- **Scaling**: Horizontal scaling adds replicas; no session affinity required
+- **Scaling**: Ships with 1 replica per service; horizontal scaling adds replicas with no session affinity required
 - **Cold start**: Fresh Docker container boots in ~2 seconds
 
 ## Extensibility
@@ -363,25 +410,27 @@ Compare the same model across four distinct purchasing channels:
 
 ### Customizing Ranking
 
-Edit `app/config.py`:
+Set via environment (or edit the defaults in `app/config.py`):
 ```python
 RANK_INPUT_WEIGHT = 0.30          # Adjust for your workload
 RANK_OUTPUT_WEIGHT = 0.70         # (must sum to 1.0)
 RANK_MIN_CONTEXT_TOKENS = 1_000_000
-RANK_MAX_INPUT_COST = 10.0
-RANK_MAX_OUTPUT_COST = 40.0
-RANK_MIN_TOOL_SUPPORT = True
+RANK_MAX_INPUT_PRICE = 10.0
+RANK_MAX_OUTPUT_PRICE = 40.0
+RANK_TOP_N = 10
 ```
 
-Then restart the service; ranking recomputes on next `/models/top` request.
+Tool-calling support is always required for the coding ranking (not
+configurable). Then restart the service; ranking recomputes on next
+`/models/top` request.
 
 ### Custom Reports
 
-Edit `app/jobs/daily_report.py`:
+Edit the constants in `app/jobs/daily_report.py` (these are not env vars):
 ```python
-BASELINE_MODEL = "anthropic/claude-3.5-sonnet"
-MONTHLY_INPUT_TOKENS = 5_000_000
-MONTHLY_OUTPUT_TOKENS = 5_000_000
+BASELINE_MODEL_ID = "anthropic/claude-sonnet-4.6"
+BASELINE_INPUT_MTOK = 5   # millions of input tokens/month
+BASELINE_OUTPUT_MTOK = 5  # millions of output tokens/month
 ```
 
 Add custom calculations (ROI, volume discounts, team allocations) in the report builder.

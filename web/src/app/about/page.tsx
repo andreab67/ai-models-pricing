@@ -24,7 +24,7 @@ export default function AboutPage() {
           <div className="text-2xl">⚡</div>
           <h3 className="font-semibold">Real-Time Pricing</h3>
           <p className="text-sm text-fg/70">
-            Automatic updates every 15 minutes normalize costs to USD per 1M tokens for instant comparison.
+            Automatic updates every 5 minutes normalize costs to USD per 1M tokens for instant comparison.
           </p>
         </div>
         <div className="card rounded-lg p-6 space-y-3">
@@ -76,7 +76,7 @@ export default function AboutPage() {
             <ul className="space-y-1 text-sm text-fg/70 ml-7">
               <li>• FastAPI with async/await for high concurrency</li>
               <li>• SQLAlchemy 2 ORM with Postgres for data persistence</li>
-              <li>• Redis for intelligent caching (900s TTL)</li>
+              <li>• Redis for intelligent caching (falls back to in-process memory if Redis is down)</li>
               <li>• Tenacity for resilient API retries</li>
             </ul>
           </div>
@@ -85,7 +85,7 @@ export default function AboutPage() {
               <span>🎨</span> Frontend
             </h3>
             <ul className="space-y-1 text-sm text-fg/70 ml-7">
-              <li>• Next.js 14 App Router with React Server Components</li>
+              <li>• Next.js 15 App Router with React Server Components</li>
               <li>• Tailwind CSS + design tokens for consistency</li>
               <li>• Recharts for real-time data visualization</li>
               <li>• Dark/light mode with system preference detection</li>
@@ -98,7 +98,7 @@ export default function AboutPage() {
             <ul className="space-y-1 text-sm text-fg/70 ml-7">
               <li>• Kubernetes for orchestration and scaling</li>
               <li>• CronJobs for automated pricing refresh & reporting</li>
-              <li>• Traefik ingress with cert-manager TLS</li>
+              <li>• Traefik ingress terminating TLS from a provided secret</li>
               <li>• Prometheus metrics and structured logging</li>
             </ul>
           </div>
@@ -109,7 +109,7 @@ export default function AboutPage() {
             <ul className="space-y-1 text-sm text-fg/70 ml-7">
               <li>• Concurrent API calls with fallback strategies</li>
               <li>• Normalized cost calculations across providers</li>
-              <li>• Real-time account balance & activity tracking</li>
+              <li>• Account spend & activity tracking across providers</li>
               <li>• Error boundaries and graceful degradation</li>
             </ul>
           </div>

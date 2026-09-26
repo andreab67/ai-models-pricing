@@ -1,6 +1,6 @@
 # AI Model Pricing Dashboard
 
-[![Latest Release](https://img.shields.io/badge/release-v1.1-blue)](https://github.com/yourusername/ai-models-pricing/releases/tag/v1.1) [![License: BSD 3-Clause](https://img.shields.io/badge/license-BSD%203--Clause-green)](LICENSE)
+[![Latest Release](https://img.shields.io/badge/release-v1.4.0-blue)](https://github.com/yourusername/ai-models-pricing/releases/tag/v1.4.0) [![License: BSD 3-Clause](https://img.shields.io/badge/license-BSD%203--Clause-green)](LICENSE)
 
 **Real-time cost tracking and optimization across 100+ LLM models from 10+ providers in one unified interface.**
 
@@ -8,7 +8,7 @@ A production-grade dashboard for tracking, comparing, and optimizing Large Langu
 
 ![Dashboard](docs/dashboard.jpg)
 
-## What's New in v1.1
+## Recent Highlights
 
 - ✨ **30-Day Price Trend Charts** — Visualize input and output costs over time per model
 - 🎨 **Redesigned Model Details Modal** — Full pricing comparison, context window, and capability tags
@@ -29,7 +29,7 @@ Organizations running multi-provider AI workloads lack a unified view of costs a
 This dashboard solves all of these problems by:
 
 - **Aggregating 100+ models** from competing providers into a single searchable catalog
-- **Auto-updating every 15 minutes** at zero cost (pricing is public data)
+- **Auto-updating on a configurable interval** at zero cost (pricing is public data) — every 5 minutes in the shipped k8s config, with the models cache held 3x that long so it never expires between runs
 - **Normalizing costs** to USD per 1M tokens for apples-to-apples comparison
 - **Ranking models intelligently** based on cost, context window, and capabilities
 - **Tracking spend** in real-time across OpenAI, Anthropic, and OpenRouter accounts
@@ -41,7 +41,7 @@ This dashboard solves all of these problems by:
 | --- | --- | --- |
 | **FastAPI Backend** | `api/` | Pricing aggregation, normalization, caching, historical tracking |
 | **Next.js Dashboard** | `web/` | Modern responsive UI with real-time charts and dark mode |
-| **Kubernetes Manifests** | `k8s/` | Production-ready deployment (Traefik, cert-manager, CronJobs) |
+| **Kubernetes Manifests** | `k8s/` | Production-ready deployment (Traefik ingress, CronJobs) |
 | **Local Dev Stack** | `docker-compose.yml` | Self-contained environment (Postgres + Redis + API + Web) |
 | **Feature Docs** | `FUNCTIONAL.md` | Complete API reference and data models |
 | **Component Inventory** | `SBOM.md` | All dependencies with licenses and security notes |
@@ -69,14 +69,15 @@ This dashboard solves all of these problems by:
   - Anomaly detection at a glance
 
 - **Account Integration**
-  - OpenAI: current-month spend + remaining credit balance
-  - Anthropic: account balance and recent activity
-  - OpenRouter: per-model usage, request counts, token volumes
+  - OpenRouter: credit balance via `/credits`, plus per-model activity (last 30 days)
+  - OpenAI: last-30-day spend via the Admin Costs API (no balance/limit exposed)
+  - Anthropic: last-30-day spend via the Admin cost report (no balance exposed)
+  - Kilo: key validation + available model count (no spend/balance endpoint)
 
 - **Production Infrastructure**
   - Kubernetes-ready with health checks and metrics
-  - Horizontal scaling (2–3 replicas per service)
-  - Automated pricing refresh every 15 minutes
+  - Horizontal scaling supported (ships with 1 replica per service; scale via Kustomize/kubectl)
+  - Automated pricing refresh every 5 minutes (configurable via `OPENROUTER_REFRESH_SECONDS`)
   - Configurable daily report emails
 
 ## Dashboard Screenshots
@@ -110,6 +111,8 @@ cd ai-models-pricing
 cp api/.env.example api/.env
 
 # 2. Start the full stack (Postgres + Redis + API + Web)
+# Requires Docker Compose v2.24+ (for the optional `env_file` entry).
+# api/.env is optional — compose reads it if present for provider keys, SMTP, etc.
 docker compose up --build
 
 # 3. Populate initial data (otherwise table is empty until first refresh)
@@ -126,7 +129,7 @@ docker compose exec api python -m app.jobs.refresh_pricing
 cd api
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
-export DATABASE_URL=postgresql+asyncpg://pricing:pricing@localhost:5432/pricing
+export DATABASE_URL=postgresql+psycopg://pricing:pricing@localhost:5432/pricing
 export REDIS_URL=redis://localhost:6379/0
 alembic upgrade head
 uvicorn app.main:app --reload
@@ -157,7 +160,7 @@ API_BASE_URL=http://localhost:8000 npm run dev
 
 ### Account Activity
 
-- `GET /accounts/usage` — spend + balance (OpenAI, Anthropic)
+- `GET /accounts/usage` — per-provider status for OpenRouter, Kilo, OpenAI, Anthropic (balance where available, else 30-day spend)
 - `GET /accounts/activity` — OpenRouter activity (last 30 days)
 - `GET /accounts/openai-activity` — OpenAI costs by model
 
@@ -183,7 +186,13 @@ docker build -t <registry>/web:latest web/
 docker push <registry>/api:latest
 docker push <registry>/web:latest
 
-# 2. Update image references in k8s/base/deployment.yaml
+# 2. Pin the prod overlay to the images you just built (don't deploy `latest`
+#    in production — see the comment in k8s/overlays/prod/kustomization.yaml)
+cd k8s/overlays/prod
+kustomize edit set image \
+  ghcr.io/andreab67/ai-models-pricing/api=<registry>/api:$SHA \
+  ghcr.io/andreab67/ai-models-pricing/web=<registry>/web:$SHA
+cd -
 
 # 3. Deploy
 kubectl create namespace model-pricing
@@ -194,20 +203,19 @@ kubectl -n model-pricing get pods,svc,ingress
 kubectl -n model-pricing logs deploy/api -f
 ```
 
-**Configure TLS:**
-```bash
-# Update domain in k8s/certificate.yaml, then apply
-kubectl apply -f k8s/certificate.yaml
-```
+**TLS:** `k8s/base/ingress.yaml` is a Traefik ingress that terminates TLS from a
+`models-tls` secret you provide — there's no cert-manager wiring in this repo.
+Create that secret yourself (cert-manager, `kubectl create secret tls`, etc.)
+before applying the ingress.
 
 ## Architecture
 
 ```text
 Ingress (TLS) → Load Balancer
-    ├─ /         → Next.js (web, replicas=2–3)
-    └─ /api/*    → FastAPI (api, replicas=2–3)
+    └─ /          → Next.js (web, 1 replica by default)
+          └─ /api/* → allowlisting proxy route → FastAPI (api, ClusterIP, 1 replica by default)
           ├─ Postgres (history, model catalog)
-          ├─ Redis (900s TTL cache)
+          ├─ Redis (cache; TTL = 3x OPENROUTER_REFRESH_SECONDS, falls back to in-process memory if down)
           └─ External APIs
               ├─ OpenRouter /models (free, public)
               ├─ OpenAI admin API (optional, billing only)
@@ -215,38 +223,49 @@ Ingress (TLS) → Load Balancer
               └─ Kilo API (optional, if using Kilo)
 
 Scheduled Tasks (CronJobs in same namespace):
-  • refresh-pricing   every 15 minutes
-  • daily-report      daily at 9 AM UTC
-  • kilo-diff         daily (pricing change alerts)
+  • refresh-pricing   every 5 minutes
+  • daily-report      daily at 8:00 AM America/Denver
+  • kilo-diff         weekly, Mondays at 07:00 America/Denver
 ```
 
 ## Configuration
 
 ### Ranking Algorithm
 
-Adjust weights in `api/app/config.py`:
+Adjust weights in `api/app/config.py` (settable via env vars of the same name, e.g. `RANK_TOP_N`):
 
 ```python
-RANK_INPUT_WEIGHT = 0.30       # 30% of blended cost
-RANK_OUTPUT_WEIGHT = 0.70      # 70% of blended cost
+RANK_INPUT_WEIGHT = 0.30        # 30% of blended cost
+RANK_OUTPUT_WEIGHT = 0.70       # 70% of blended cost
 RANK_MIN_CONTEXT_TOKENS = 1_000_000   # Exclude smaller models
-RANK_MAX_INPUT_COST = 10.0     # USD per million tokens
-RANK_MAX_OUTPUT_COST = 40.0    # USD per million tokens
+RANK_MAX_INPUT_PRICE = 10.0     # USD per million tokens
+RANK_MAX_OUTPUT_PRICE = 40.0    # USD per million tokens
+RANK_TOP_N = 10                 # Default size of /models/top
 ```
 
 ### Email Reports
 
-Customize the daily report in `api/app/jobs/daily_report.py`:
+The baseline model and monthly token assumptions used for the "projected
+savings" line are hardcoded constants in `api/app/jobs/daily_report.py` (not
+env vars) — edit them directly:
 
 ```python
-BASELINE_MODEL = "anthropic/claude-3.5-sonnet"
-MONTHLY_INPUT_TOKENS = 5_000_000
-MONTHLY_OUTPUT_TOKENS = 5_000_000
+BASELINE_MODEL_ID = "anthropic/claude-sonnet-4.6"
+BASELINE_INPUT_MTOK = 5   # millions of input tokens/month
+BASELINE_OUTPUT_MTOK = 5  # millions of output tokens/month
 ```
 
 ### Kilo Pricing
 
-Kilo tiers are defined in `api/app/data/kilo_plans.yaml`. Update whenever Kilo pricing changes, or create a monitoring CronJob for automated alerts.
+Kilo tiers are defined in `api/app/data/kilo_plans.yaml`. Update whenever Kilo
+pricing changes, or create a monitoring CronJob for automated alerts. The
+active tier for the account widget and daily report is set via `KILO_TIER`
+(`starter` / `pro` / `expert`, default `starter`).
+
+### Other Settings
+
+- `SNAPSHOT_RETENTION_DAYS` — how long hourly pricing snapshots are kept before pruning (default 90; 0 disables pruning)
+- `CACHE_TTL_SECONDS` — default Redis TTL used outside the models cache (default 900)
 
 ## Customization Guide
 
@@ -283,33 +302,32 @@ Extend `api/app/jobs/daily_report.py` with:
 
 ## Monitoring & Observability
 
-- **Prometheus metrics**: Request count, latency, cache hit rate
-- **Structured logging**: JSON format with context (model_id, provider, error_code)
-- **Health checks**: `/healthz` (liveness), `/readyz` (readiness with DB check)
-- **Grafana**: Optional dashboard for request patterns and cache performance
+- **Prometheus metrics** (`/metrics`): request count and latency, labeled by method/route/status
+- **Structured logging**: JSON format via structlog
+- **Health checks**: `/healthz` (liveness), `/readyz` (readiness — gated on Postgres; Redis is reported but does not gate)
+- **Grafana**: Optional dashboard for request patterns (bring your own; not shipped)
 
 ## Security
 
 - **No secrets in code**: All credentials via environment or Kubernetes secrets
-- **TLS everywhere**: cert-manager auto-renews certificates
-- **Audit logging**: All API requests logged with timestamp, user, and response
-- **CORS**: Configured for same-origin requests only
-- **Rate limiting**: Optional throttling via middleware (not enabled by default)
+- **TLS via ingress**: Traefik terminates TLS from a secret you provide (no cert-manager wiring included)
+- **Request logging**: Structured JSON logs (no per-user identity captured) plus Prometheus request/latency metrics
+- **CORS**: Restricted to the origins in `CORS_ORIGINS`
+- **Account data gating**: the web proxy only forwards `/accounts/*` when `EXPOSE_ACCOUNT_DATA=true`, which should be enabled only behind authentication (e.g. Traefik `basicAuth`/`forwardAuth`)
 - **Input validation**: Pydantic schemas enforce types and ranges
 
 ## Performance
 
 - **Response times**: <100ms (cached) / <500ms (history queries)
-- **Throughput**: 1000+ req/s per pod
 - **Memory**: ~300MB API, ~200MB web per pod
-- **Scaling**: Horizontal scaling with 2–3 replicas
+- **Scaling**: Ships with 1 replica per service; horizontal scaling supported via Kustomize/kubectl
 - **Cold start**: ~2 seconds per pod
 
 ## Dependencies
 
 - **Backend**: Python 3.14, FastAPI, SQLAlchemy 2.0, Pydantic 2.0, Postgres, Redis
 - **Frontend**: Node.js 22, Next.js 15, React 19, TypeScript, Tailwind CSS, Recharts
-- **Infrastructure**: Docker, Kubernetes 1.28+, Traefik, cert-manager
+- **Infrastructure**: Docker, Kubernetes 1.28+, Traefik
 
 See `SBOM.md` for complete dependency inventory and license compliance.
 
