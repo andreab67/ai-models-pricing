@@ -10,7 +10,10 @@ import { TopTenRanking } from "@/components/TopTenRanking";
 export default function DashboardPage() {
   const [selected, setSelected] = useState<string | null>(null);
   const [tier, setTier] = useState("starter");
-  const [streakMonths, setStreakMonths] = useState(1);
+  // Start at the steady-state streak (the month the bonus reaches its 40% cap
+  // in kilo_plans.yaml). Month 1 is a one-off 50% welcome bonus and would
+  // overstate the recurring Kilo Pass discount; users can still pick it.
+  const [streakMonths, setStreakMonths] = useState(8);
   const [annual, setAnnual] = useState(false);
 
   return (

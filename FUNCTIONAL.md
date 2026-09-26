@@ -116,9 +116,9 @@ Compare the same model across four distinct purchasing channels:
 
 | Endpoint | Method | Query Parameters | Response | Purpose |
 |----------|--------|------------------|----------|---------|
-| `GET /compare/{model_id}` | GET | `kilo_tier=pro&kilo_streak_months=8&kilo_annual=false` | `ModelComparison` | Compare pricing across 4 channels |
+| `GET /compare/{model_id}` | GET | `kilo_tier`, `kilo_streak_months`, `kilo_annual=false` (all optional) | `ModelComparison` | Compare pricing across 4 channels |
 
-`kilo_tier` must be one of `starter`/`pro`/`expert`; an unknown tier returns **422**. 404 if `model_id` is not found.
+`kilo_tier` defaults to the configured `KILO_TIER` and must be one of `starter`/`pro`/`expert` if given (an unknown tier returns **422**). `kilo_streak_months` defaults to the steady-state streak, the month the bonus reaches its cap in `kilo_plans.yaml` (month 8), and must be 1–120 if given. The one-off month-1 welcome bonus is used only when asked for explicitly. 404 if `model_id` is not found.
 
 **Response Schema: ModelComparison**
 ```json

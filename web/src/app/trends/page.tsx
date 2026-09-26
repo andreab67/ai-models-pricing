@@ -11,13 +11,8 @@ export default function AllModelsPage() {
   return (
     <div className="space-y-6">
       <ModelTable onSelect={setSelected} />
-      <ModelDetailModal
-        modelId={selected}
-        onClose={() => setSelected(null)}
-        kiloTier="starter"
-        kiloStreakMonths={1}
-        kiloAnnual={false}
-      />
+      {/* Kilo assumptions omitted: the API uses KILO_TIER at the steady-state streak. */}
+      <ModelDetailModal modelId={selected} onClose={() => setSelected(null)} />
     </div>
   );
 }

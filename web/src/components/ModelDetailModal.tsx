@@ -28,17 +28,19 @@ const CHANNEL_LABEL: Record<string, string> = {
 interface Props {
   modelId: string | null;
   onClose: () => void;
-  kiloTier: string;
-  kiloStreakMonths: number;
-  kiloAnnual: boolean;
+  /** Omit to use the API's configured KILO_TIER. */
+  kiloTier?: string | null;
+  /** Omit to use the steady-state streak, not the one-off month-1 bonus. */
+  kiloStreakMonths?: number | null;
+  kiloAnnual?: boolean;
 }
 
 export function ModelDetailModal({
   modelId,
   onClose,
-  kiloTier,
-  kiloStreakMonths,
-  kiloAnnual,
+  kiloTier = null,
+  kiloStreakMonths = null,
+  kiloAnnual = false,
 }: Props) {
   const closeRef = useRef<HTMLButtonElement>(null);
   const dialogRef = useRef<HTMLDivElement>(null);

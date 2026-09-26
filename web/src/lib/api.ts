@@ -121,19 +121,27 @@ export function useTopModels(n: number = 10) {
   return useSWR<RankedModel[]>(`/api/models/top?n=${n}`, fetcher, defaultConfig);
 }
 
+/**
+ * Channel comparison for one model. Omit (or pass null for) the Kilo tier or
+ * streak to let the API use the configured KILO_TIER at the steady-state
+ * streak (the month the bonus reaches its cap). The month-1 welcome bonus is
+ * one-off, so hard-coding month 1 overstated the recurring Kilo discount.
+ */
 export function useComparison(
   modelId: string | null,
-  kiloTier: string,
-  kiloStreakMonths: number,
-  kiloAnnual: boolean,
+  kiloTier?: string | null,
+  kiloStreakMonths?: number | null,
+  kiloAnnual: boolean = false,
 ) {
-  const url = modelId
-    ? `/api/compare/${modelPath(modelId)}?${new URLSearchParams({
-        kilo_tier: kiloTier,
-        kilo_streak_months: String(clampStreak(kiloStreakMonths)),
-        kilo_annual: String(kiloAnnual),
-      })}`
-    : null;
+  let url: string | null = null;
+  if (modelId) {
+    const params = new URLSearchParams({ kilo_annual: String(kiloAnnual) });
+    if (kiloTier) params.set("kilo_tier", kiloTier);
+    if (kiloStreakMonths != null) {
+      params.set("kilo_streak_months", String(clampStreak(kiloStreakMonths)));
+    }
+    url = `/api/compare/${modelPath(modelId)}?${params}`;
+  }
   return useSWR<ModelComparison>(url, fetcher, defaultConfig);
 }
 
