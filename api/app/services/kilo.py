@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import math
 from pathlib import Path
 
 import httpx
@@ -25,28 +26,47 @@ def _load_yaml() -> dict:
         return yaml.safe_load(f)
 
 
+def load_bonus_growth() -> dict:
+    return dict(_load_yaml()["bonus_growth"])
+
+
 def load_plans() -> list[KiloPlan]:
     data = _load_yaml()
     return [KiloPlan.model_validate(p) for p in data["plans"]]
 
 
-def monthly_bonus_pct(streak_months: int, growth: dict) -> float:
+def monthly_bonus_pct(
+    streak_months: int, growth: dict, plan_cap_pct: float | None = None
+) -> float:
     """Return Kilo's published bonus % for a given subscription streak.
 
     Month 1 = welcome bonus (50%).
-    Month n (n>=2) = min(step_pct * n, cap_pct) — anchored to Kilo's published
-    "40% max bonus unlocked by month 8".
+    Month n (n>=2) = min(step_pct * n, cap) — anchored to Kilo's published
+    "40% max bonus unlocked by month 8". ``cap`` is the plan's own
+    ``max_bonus_pct`` when given, never above the global ``cap_pct``.
     """
     if streak_months <= 0:
         return 0.0
     if streak_months == 1:
         return float(growth["welcome_pct"])
+    cap = float(growth["cap_pct"])
+    if plan_cap_pct is not None:
+        cap = min(cap, float(plan_cap_pct))
     # Kilo's published schedule caps at 40% by month 8 with +5%/month steps.
     # The simplest formula matching that anchor is step * n, starting from m2.
     # (Their "starts at 5%" marketing line implies m2=5% which contradicts a
     # 40% cap at m8; we honor the cap-month since that's the load-bearing one.)
     pct = float(growth["step_pct"]) * streak_months
-    return min(pct, float(growth["cap_pct"]))
+    return min(pct, cap)
+
+
+def steady_state_streak(growth: dict) -> int:
+    """First month at which the monthly bonus reaches its cap (month 8 today)."""
+    step = float(growth["step_pct"])
+    cap = float(growth["cap_pct"])
+    if step <= 0:
+        return 2
+    return max(2, math.ceil(round(cap / step, 9)))
 
 
 def project(tier: str, streak_months: int, annual: bool = False) -> KiloProjection:
@@ -55,14 +75,15 @@ def project(tier: str, streak_months: int, annual: bool = False) -> KiloProjecti
     if tier not in plans:
         raise ValueError(f"Unknown tier: {tier}")
     p = plans[tier]
+    paid_credits = float(p["paid_credits_usd"])
 
     if annual:
+        # annual plans pay 12x upfront; the flat annual bonus applies per month
         bonus_pct = float(p["annual_bonus_pct"])
-        # annual plans pay 12x upfront, but bonus is per-month
-        paid_credits = float(p["paid_credits_usd"])
     else:
-        bonus_pct = monthly_bonus_pct(streak_months, data["bonus_growth"])
-        paid_credits = float(p["paid_credits_usd"])
+        bonus_pct = monthly_bonus_pct(
+            streak_months, data["bonus_growth"], plan_cap_pct=p.get("max_bonus_pct")
+        )
 
     bonus_credits = round(paid_credits * bonus_pct, 4)
     return KiloProjection(

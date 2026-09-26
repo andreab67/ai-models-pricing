@@ -1,1 +1,2 @@
-web/tsconfig.tsbuildinfo
+# TypeScript incremental build info (generated)
+*.tsbuildinfo

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+import os
+import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -53,21 +55,34 @@ REQ_LATENCY = Histogram(
 )
 
 
-class MetricsMiddleware(BaseHTTPMiddleware):
-    async def dispatch(self, request: Request, call_next):  # type: ignore[override]
-        import time as _t
+UNMATCHED_ROUTE = "__unmatched__"
 
-        start = _t.perf_counter()
+
+def _route_label(request: Request) -> str:
+    """Return the matched route template (e.g. ``/models/{model_id:path}``).
+
+    Labelling by the raw URL path would create a new Prometheus series for
+    every model id and every scanner 404, growing memory without bound. The
+    router stores the matched route on the ASGI scope, which is shared with
+    this middleware, so it is available once ``call_next`` returns.
+    """
+    route = request.scope.get("route")
+    path = getattr(route, "path", None)
+    return path if isinstance(path, str) else UNMATCHED_ROUTE
+
+
+class MetricsMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):  # type: ignore[no-untyped-def]
+        start = time.perf_counter()
         try:
             response: Response = await call_next(request)
         except Exception:
-            REQ_COUNT.labels(request.method, request.url.path, "500").inc()
+            REQ_COUNT.labels(request.method, _route_label(request), "500").inc()
             raise
-        elapsed = _t.perf_counter() - start
-        REQ_LATENCY.labels(request.method, request.url.path).observe(elapsed)
-        REQ_COUNT.labels(
-            request.method, request.url.path, str(response.status_code)
-        ).inc()
+        elapsed = time.perf_counter() - start
+        route = _route_label(request)
+        REQ_LATENCY.labels(request.method, route).observe(elapsed)
+        REQ_COUNT.labels(request.method, route, str(response.status_code)).inc()
         return response
 
 
@@ -105,10 +120,13 @@ app.include_router(accounts_routes.router)
 
 @app.get("/metrics")
 async def metrics() -> Response:
-    registry = CollectorRegistry()
-    try:
+    # Uvicorn runs one worker per pod (scale with replicas), so the default
+    # registry is complete. If PROMETHEUS_MULTIPROC_DIR is set for a
+    # multi-worker deployment, aggregate across workers instead.
+    if os.environ.get("PROMETHEUS_MULTIPROC_DIR"):
+        registry = CollectorRegistry()
         multiprocess.MultiProcessCollector(registry)
         data = generate_latest(registry)
-    except (ValueError, KeyError):
+    else:
         data = generate_latest()
     return Response(content=data, media_type=CONTENT_TYPE_LATEST)

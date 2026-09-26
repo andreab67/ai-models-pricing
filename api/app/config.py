@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -28,7 +29,11 @@ class Settings(BaseSettings):
     openrouter_base_url: str = Field(default="https://openrouter.ai/api/v1")
     openrouter_models_path: str = Field(default="/models")
     openrouter_timeout_s: float = Field(default=15.0)
+    # Expected interval between refresh-pricing runs; the models cache lives
+    # 3x this long so it never expires between runs.
     openrouter_refresh_seconds: int = Field(default=900)  # 15 min
+    # Hourly snapshots older than this are pruned by the refresh job (0 = keep).
+    snapshot_retention_days: int = Field(default=90)
 
     # --- kilo -------------------------------------------------------------
     kilo_plans_path: Path = Field(default=Path(__file__).parent / "data" / "kilo_plans.yaml")
@@ -79,12 +84,18 @@ class Settings(BaseSettings):
     anthropic_api_key: str = Field(default="")
     anthropic_admin_key: str = Field(default="")
 
-    # --- kilo plan (used for account widget) -----------------------------
-    kilo_tier: str = Field(default="starter")
+    # --- kilo plan (account widget + daily report savings) ---------------
+    # Must be a tier in kilo_plans.yaml; an unknown value fails fast at start.
+    kilo_tier: Literal["starter", "pro", "expert"] = Field(default="starter")
 
     # --- comparison wrappers ---------------------------------------------
     openrouter_payg_fee_pct: float = Field(default=0.055)
     openrouter_byok_fee_pct: float = Field(default=0.05)
+
+    @field_validator("kilo_tier", mode="before")
+    @classmethod
+    def _normalize_tier(cls, v: object) -> object:
+        return v.strip().lower() if isinstance(v, str) else v
 
 
 @lru_cache(maxsize=1)

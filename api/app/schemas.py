@@ -101,9 +101,3 @@ class ActivityResponse(BaseModel):
     items: list[ModelActivityItem]
     fetched_at: datetime
 
-
-class DailyTopFive(BaseModel):
-    generated_at: datetime
-    models: list[RankedModel]
-    projected_monthly_savings_usd: float
-    baseline_assumption: str

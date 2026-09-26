@@ -1,6 +1,6 @@
 "use client";
 
-import { useKiloProjection } from "@/lib/api";
+import { STREAK_MAX, STREAK_MIN, clampStreak, useKiloProjection } from "@/lib/api";
 
 interface Props {
   tier: string;
@@ -47,9 +47,9 @@ export function KiloPassCalculator({
           <input
             type="number"
             value={streakMonths}
-            min={1}
-            max={120}
-            onChange={(e) => setStreakMonths(parseInt(e.target.value || "1", 10))}
+            min={STREAK_MIN}
+            max={STREAK_MAX}
+            onChange={(e) => setStreakMonths(clampStreak(parseInt(e.target.value, 10)))}
             disabled={annual}
             className="mt-1 block w-full rounded border border-border bg-card text-fg p-1 text-sm disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent"
           />
@@ -67,7 +67,7 @@ export function KiloPassCalculator({
 
       <div className="mt-3 text-sm">
         {isLoading && <span className="opacity-60">Loading…</span>}
-        {error && <span className="text-red-500">Error: {String(error)}</span>}
+        {error && <span className="text-red-500">Error: {error.message}</span>}
         {data && (
           <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
             <Stat label="Paid credits" value={`$${data.paid_credits_usd.toFixed(2)}`} />

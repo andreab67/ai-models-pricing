@@ -1,6 +1,13 @@
 "use client";
 
-import { useAccountUsage, useOpenAIActivity, fmtUsd, type AccountProviderUsage, type ModelActivityItem } from "@/lib/api";
+import {
+  fmtUsd,
+  isNotExposed,
+  useAccountUsage,
+  useOpenAIActivity,
+  type AccountProviderUsage,
+  type ModelActivityItem,
+} from "@/lib/api";
 
 const PROVIDER_META: Record<string, { name: string; color: string }> = {
   openrouter: { name: "OpenRouter", color: "text-violet-400" },
@@ -136,6 +143,10 @@ function ProviderCard({ account, openaiActivity }: { account: AccountProviderUsa
 export function AccountBalances() {
   const { data, error, isLoading } = useAccountUsage();
   const { data: openaiActivityData } = useOpenAIActivity();
+
+  // Account data is private: the web proxy only serves it when
+  // EXPOSE_ACCOUNT_DATA=true. Otherwise hide the panel entirely.
+  if (isNotExposed(error)) return null;
 
   return (
     <div className="rounded-lg border border-border bg-card/50 p-4 space-y-3">

@@ -1,9 +1,13 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 namespace: model-pricing
-commonLabels:
-  app.kubernetes.io/part-of: model-pricing
-  app.kubernetes.io/managed-by: kustomize
+# `labels` replaces the deprecated `commonLabels`. includeSelectors keeps the
+# existing Deployment selectors unchanged (selectors are immutable).
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: model-pricing
+      app.kubernetes.io/managed-by: kustomize
+    includeSelectors: true
 resources:
   - namespace.yaml
   - configmap.yaml

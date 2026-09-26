@@ -6,12 +6,13 @@ per-token USD strings; we convert to USD per 1M tokens for sane display.
 
 from __future__ import annotations
 
+import asyncio
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import httpx
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from tenacity import (
     AsyncRetrying,
@@ -31,6 +32,25 @@ log = get_logger(__name__)
 _settings = get_settings()
 
 OPENROUTER_MODELS_CACHE_KEY = "openrouter:models:normalized"
+
+# The cache must outlive the refresh interval, or every cycle leaves a window
+# (job startup + fetch) where the key is gone and requests stampede upstream.
+CACHE_TTL_MULTIPLIER = 3
+
+# Single-flight: concurrent cache misses await one shared refresh task, so a
+# failure is shared too instead of each waiter re-running the retry cycle.
+_inflight_refresh: asyncio.Task[list[ModelPricing]] | None = None
+
+
+def models_cache_ttl() -> int:
+    return _settings.openrouter_refresh_seconds * CACHE_TTL_MULTIPLIER
+
+
+def _float_or_zero(value: Any) -> float:
+    try:
+        return float(value or 0)
+    except (TypeError, ValueError):
+        return 0.0
 
 
 def _to_mtok(per_token: str | float | None) -> float:
@@ -67,8 +87,8 @@ def _normalize(raw_model: dict[str, Any]) -> ModelPricing | None:
         provider=provider,
         prompt_usd_per_mtok=round(prompt, 4),
         completion_usd_per_mtok=round(completion, 4),
-        request_usd=float(pricing.get("request") or 0),
-        image_usd=float(pricing.get("image") or 0),
+        request_usd=_float_or_zero(pricing.get("request")),
+        image_usd=_float_or_zero(pricing.get("image")),
         context_length=raw_model.get("context_length") or top.get("context_length"),
         max_completion_tokens=top.get("max_completion_tokens"),
         supports_tools="tools" in (raw_model.get("supported_parameters") or []),
@@ -98,24 +118,41 @@ async def fetch_raw() -> list[dict[str, Any]]:
     return []  # unreachable; tenacity reraise=True
 
 
+def normalize_all(raw: list[dict[str, Any]]) -> list[ModelPricing]:
+    """Normalize every record, skipping (and logging) malformed ones.
+
+    One bad record from upstream must not abort the whole refresh.
+    """
+    normalized: list[ModelPricing] = []
+    for r in raw:
+        try:
+            m = _normalize(r)
+        except Exception as exc:
+            log.warning(
+                "openrouter_model_skipped",
+                model_id=r.get("id") if isinstance(r, dict) else None,
+                error=str(exc),
+            )
+            continue
+        if m is not None:
+            normalized.append(m)
+    return normalized
+
+
 async def refresh_pricing(persist: bool = True) -> list[ModelPricing]:
     """Fetch, normalize, cache, and (optionally) persist to Postgres."""
     raw = await fetch_raw()
-    normalized: list[ModelPricing] = []
-    for r in raw:
-        m = _normalize(r)
-        if m is None:
-            continue
-        normalized.append(m)
+    normalized = normalize_all(raw)
 
     await cache.set(
         OPENROUTER_MODELS_CACHE_KEY,
         [m.model_dump(mode="json") for m in normalized],
-        ttl=_settings.openrouter_refresh_seconds,
+        ttl=models_cache_ttl(),
     )
 
     if persist:
         await _persist(raw, normalized)
+        await prune_snapshots()
 
     return normalized
 
@@ -123,38 +160,80 @@ async def refresh_pricing(persist: bool = True) -> list[ModelPricing]:
 async def _persist(
     raw: list[dict[str, Any]], normalized: list[ModelPricing]
 ) -> None:
-    """Insert today's snapshot, skipping duplicates (model_id, captured_at)."""
+    """Insert one snapshot per model per hour in a single batched statement.
+
+    The refresh job runs several times an hour; rows already present for the
+    current hour bucket are skipped by the unique constraint, and models that
+    were missing from an earlier run in the same hour are filled in.
+    """
+    if not normalized:
+        return
     now = datetime.now(UTC).replace(minute=0, second=0, microsecond=0)
-    raw_by_id = {r.get("id"): r for r in raw}
+    raw_by_id = {r.get("id"): r for r in raw if isinstance(r, dict)}
 
     async with session_scope() as session:
-        for m in normalized:
-            stmt = pg_insert(ModelPricingSnapshot).values(
-                model_id=m.id,
-                name=m.name,
-                provider=m.provider,
-                prompt_usd_per_mtok=m.prompt_usd_per_mtok,
-                completion_usd_per_mtok=m.completion_usd_per_mtok,
-                request_usd=m.request_usd,
-                image_usd=m.image_usd,
-                context_length=m.context_length,
-                max_completion_tokens=m.max_completion_tokens,
-                supports_tools=m.supports_tools,
-                supports_vision=m.supports_vision,
-                raw=json.dumps(raw_by_id.get(m.id) or {}),
-                captured_at=now,
-            ).on_conflict_do_nothing(constraint="uq_model_captured")
-            await session.execute(stmt)
-    log.info("openrouter_persist_ok", count=len(normalized))
+        rows = [
+            {
+                "model_id": m.id,
+                "name": m.name,
+                "provider": m.provider,
+                "prompt_usd_per_mtok": m.prompt_usd_per_mtok,
+                "completion_usd_per_mtok": m.completion_usd_per_mtok,
+                "request_usd": m.request_usd,
+                "image_usd": m.image_usd,
+                "context_length": m.context_length,
+                "max_completion_tokens": m.max_completion_tokens,
+                "supports_tools": m.supports_tools,
+                "supports_vision": m.supports_vision,
+                "raw": json.dumps(raw_by_id.get(m.id) or {}),
+                "captured_at": now,
+            }
+            for m in normalized
+        ]
+        stmt = (
+            pg_insert(ModelPricingSnapshot)
+            .values(rows)
+            .on_conflict_do_nothing(constraint="uq_model_captured")
+        )
+        await session.execute(stmt)
+    log.info("openrouter_persist_ok", count=len(normalized), captured_at=now.isoformat())
+
+
+async def prune_snapshots() -> int:
+    """Delete snapshots older than the configured retention window."""
+    days = _settings.snapshot_retention_days
+    if days <= 0:
+        return 0
+    cutoff = datetime.now(UTC) - timedelta(days=days)
+    async with session_scope() as session:
+        result = await session.execute(
+            delete(ModelPricingSnapshot).where(ModelPricingSnapshot.captured_at < cutoff)
+        )
+    deleted = int(getattr(result, "rowcount", 0) or 0)
+    if deleted:
+        log.info("openrouter_snapshots_pruned", deleted=deleted, retention_days=days)
+    return deleted
 
 
 async def list_models(use_cache: bool = True) -> list[ModelPricing]:
-    """Public read path. Returns cached models or refreshes on miss."""
+    """Public read path. Returns cached models or refreshes on miss.
+
+    Concurrent misses share one upstream fetch: the first caller starts a
+    refresh task and every other caller awaits the same task (and gets the
+    same result or exception).
+    """
+    global _inflight_refresh
     if use_cache:
         cached = await cache.get(OPENROUTER_MODELS_CACHE_KEY)
         if cached:
             return [ModelPricing.model_validate(c) for c in cached]
-    return await refresh_pricing(persist=False)
+    if _inflight_refresh is None or _inflight_refresh.done():
+        _inflight_refresh = asyncio.create_task(refresh_pricing(persist=False))
+        # Mark the exception as retrieved even if every waiter was cancelled,
+        # so asyncio does not log "Task exception was never retrieved".
+        _inflight_refresh.add_done_callback(lambda t: t.cancelled() or t.exception())
+    # shield: a cancelled request must not cancel the refresh others await.
+    return await asyncio.shield(_inflight_refresh)
 
 
 async def get_model(model_id: str) -> ModelPricing | None:
@@ -167,8 +246,6 @@ async def get_model(model_id: str) -> ModelPricing | None:
 
 async def get_history(model_id: str, days: int = 30) -> list[ModelPricing]:
     """Pull recent snapshots from Postgres."""
-    from datetime import timedelta
-
     since = datetime.now(UTC) - timedelta(days=days)
     async with session_scope() as session:
         stmt = (
