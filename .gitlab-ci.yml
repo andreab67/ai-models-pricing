@@ -11,6 +11,7 @@ variables:
 
 lint:web:
   stage: lint
+  tags: [k8s]
   image: node:22-alpine
   script:
     - cd web
@@ -26,6 +27,7 @@ lint:web:
 
 lint:api:
   stage: lint
+  tags: [k8s]
   image: python:3.14-slim
   script:
     - cd api
@@ -37,6 +39,7 @@ lint:api:
 
 test:api:
   stage: test
+  tags: [k8s]
   image: python:3.14-slim
   script:
     - cd api
@@ -48,6 +51,7 @@ test:api:
 
 scan:api-base-trivy:
   stage: sast
+  tags: [k8s]
   image:
     name: aquasec/trivy:latest
     entrypoint: [""]
@@ -71,6 +75,7 @@ scan:api-base-trivy:
 
 scan:web-base-trivy:
   stage: sast
+  tags: [k8s]
   image:
     name: aquasec/trivy:latest
     entrypoint: [""]
@@ -94,6 +99,7 @@ scan:web-base-trivy:
 
 build:api:
   stage: build
+  tags: [k8s]
   timeout: 1h
   image:
     name: gcr.io/kaniko-project/executor:debug
@@ -122,6 +128,7 @@ build:api:
 
 build:web:
   stage: build
+  tags: [k8s]
   timeout: 1h
   image:
     name: gcr.io/kaniko-project/executor:debug
@@ -150,6 +157,7 @@ build:web:
 
 test:db-migrations:
   stage: test
+  tags: [k8s]
   image: python:3.14-slim
   script:
     - cd api
@@ -184,6 +192,7 @@ test:db-migrations:
 # Add any new `test` stage job here too.
 deploy:k8s:
   stage: deploy
+  tags: [k8s]
   image:
     name: bitnami/kubectl:latest
     entrypoint: [""]
