@@ -230,12 +230,17 @@ async def test_anthropic_unconfigured(monkeypatch):
 async def test_anthropic_balance_parsed(monkeypatch):
     _patch_settings(monkeypatch, anthropic_api_key="sk-ant-test", anthropic_admin_key="")
     with respx.mock(assert_all_called=False) as mock:
-        mock.get("https://api.anthropic.com/v1/organizations").respond(
-            200, json={"data": [{"id": "org-abc"}]}
+        # /v1/organizations/me works for any admin key (and any org-scoped
+        # user key) without requiring the org-list endpoint.
+        mock.get("https://api.anthropic.com/v1/organizations/me").respond(
+            200, json={"id": "org-abc", "type": "organization", "name": "Test"}
         )
-        mock.get(
-            "https://api.anthropic.com/v1/organizations/org-abc/billing/balance"
-        ).respond(200, json={"available_credit": 50.0, "used_credit": 12.5, "currency": "USD"})
+        # The billing endpoint is the URL-path form
+        # /v1/organizations/{id}/billing/balance OR the header-scoped
+        # /v1/billing/balance; we use the header form.
+        mock.get("https://api.anthropic.com/v1/billing/balance").respond(
+            200, json={"available_credit": 50.0, "used_credit": 12.5, "currency": "USD"}
+        )
         out = await accounts._check_anthropic()
     assert out.configured is True
     # Anthropic's billing endpoint returns DOLLARS, not cents.
@@ -245,25 +250,31 @@ async def test_anthropic_balance_parsed(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_anthropic_admin_required_on_403(monkeypatch):
+async def test_anthropic_billing_404_means_insufficient_scope(monkeypatch):
+    """Admin key with org-read but NOT billing:read returns 404 on every
+    billing endpoint -- surface a clear action verb in the error.
+    """
     _patch_settings(monkeypatch, anthropic_api_key="sk-ant-user", anthropic_admin_key="")
     with respx.mock(assert_all_called=False) as mock:
-        mock.get("https://api.anthropic.com/v1/organizations").respond(403)
+        mock.get("https://api.anthropic.com/v1/organizations/me").respond(
+            200, json={"id": "org-abc", "type": "organization", "name": "Test"}
+        )
+        mock.get("https://api.anthropic.com/v1/billing/balance").respond(404)
         out = await accounts._check_anthropic()
     assert out.configured is True
-    assert out.error == "admin key required for billing"
+    assert "billing:read" in (out.error or "")
 
 
 @pytest.mark.asyncio
 async def test_anthropic_no_org_reports_error(monkeypatch):
     _patch_settings(monkeypatch, anthropic_api_key="sk-ant-test", anthropic_admin_key="")
     with respx.mock(assert_all_called=False) as mock:
-        mock.get("https://api.anthropic.com/v1/organizations").respond(
-            200, json={"data": []}
+        mock.get("https://api.anthropic.com/v1/organizations/me").respond(
+            200, json={"id": None}
         )
         out = await accounts._check_anthropic()
     assert out.configured is True
-    assert "no organization" in (out.error or "")
+    assert "organization id missing" in (out.error or "")
 
 
 # ---------------------------------------------------------------------------
@@ -280,6 +291,9 @@ async def test_openai_unconfigured(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_openai_credit_grants_parsed(monkeypatch):
+    """When the operator has a real admin key, the credit-grants endpoint
+    returns the $ balance window directly.
+    """
     _patch_settings(monkeypatch, openai_api_key="", openai_admin_key="sk-admin-test")
     with respx.mock(base_url="https://api.openai.com") as mock:
         mock.get("/v1/dashboard/billing/credit_grants").respond(
@@ -301,13 +315,63 @@ async def test_openai_credit_grants_parsed(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_openai_user_key_surfaces_admin_required(monkeypatch):
+async def test_openai_billing_gated_falls_back_to_usage(monkeypatch):
+    """OpenAI blocks /v1/dashboard/billing/credit_grants from server-side
+    keys (returns 403 'must be made with a session key'). We fall back to
+    /v1/usage which works server-side and shows 7d request counts.
+    """
     _patch_settings(monkeypatch, openai_api_key="sk-test", openai_admin_key="")
-    with respx.mock(base_url="https://api.openai.com") as mock:
-        mock.get("/v1/dashboard/billing/credit_grants").respond(403)
+    with respx.mock(assert_all_called=False) as mock:
+        mock.get("https://api.openai.com/v1/dashboard/billing/credit_grants").respond(
+            403,
+            json={
+                "error": {
+                    "message": (
+                        "must be made with a session key (that is, it can "
+                        "only be made from the browser). You made it with "
+                        "the following key type: secret."
+                    )
+                }
+            },
+        )
+        mock.get("https://api.openai.com/v1/usage").respond(
+            200,
+            json={
+                "object": "list",
+                "data": [
+                    {
+                        "aggregation_timestamp": "2026-09-21 00:00:00",
+                        "n_requests": 100,
+                        "n_context_tokens_total": 5000,
+                        "n_generated_tokens_total": 8000,
+                        "operation": "completion",
+                        "snapshot_id": "snap",
+                        "model": "gpt-4",
+                    }
+                ],
+                "ft_data": [],
+                "dalle_api_data": [],
+                "whisper_api_data": [],
+                "tts_api_data": [],
+                "assistant_code_interpreter_data": [],
+                "retrieval_storage_data": [],
+            },
+        )
         out = await accounts._check_openai()
     assert out.configured is True
-    assert out.error == "admin key required for billing"
+    # Server-side path: shows usage counts and an actionable error pointing
+    # the operator at the dashboard for actual $ balance.
+    assert out.usage_count == 100
+    assert "billing endpoint requires browser session" in (out.error or "")
+
+
+@pytest.mark.asyncio
+async def test_openai_401_reports_invalid_key(monkeypatch):
+    _patch_settings(monkeypatch, openai_api_key="sk-bad", openai_admin_key="")
+    with respx.mock(base_url="https://api.openai.com") as mock:
+        mock.get("/v1/dashboard/billing/credit_grants").respond(401)
+        out = await accounts._check_openai()
+    assert out.error == "API key invalid"
 
 
 # ---------------------------------------------------------------------------
@@ -359,24 +423,55 @@ async def test_alibaba_unconfigured(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_alibaba_valid_key_returns_active(monkeypatch):
-    _patch_settings(monkeypatch, alibaba_api_key="sk-alibaba")
-    with respx.mock(base_url="https://dashscope.aliyuncs.com") as mock:
-        # MUST be the free metadata endpoint, not the billable text-generation
-        # endpoint -- otherwise every dashboard refresh costs real tokens.
-        mock.get("/api/v1/models").respond(200, json={"data": []})
+async def test_alibaba_intl_endpoint_accepted(monkeypatch):
+    """International DashScope site (auto-redirect for users outside China)
+    uses ``dashscope-intl.aliyuncs.com``; that's the FIRST host we try.
+    """
+    _patch_settings(monkeypatch, alibaba_api_key="sk-alibaba-intl")
+    with respx.mock(assert_all_called=False) as mock:
+        mock.get("https://dashscope-intl.aliyuncs.com/api/v1/models").respond(
+            200, json={"data": []}
+        )
         out = await accounts._check_alibaba()
     assert out.configured is True
     assert out.error is None
 
 
 @pytest.mark.asyncio
-async def test_alibaba_invalid_key_reports_error(monkeypatch):
-    _patch_settings(monkeypatch, alibaba_api_key="sk-bad")
-    with respx.mock(base_url="https://dashscope.aliyuncs.com") as mock:
-        mock.get("/api/v1/models").respond(401)
+async def test_alibaba_mainland_endpoint_fallback(monkeypatch):
+    """If the international host rejects the key (e.g. mainland account)
+    we fall through to ``dashscope.aliyuncs.com`` and use that response.
+    """
+    _patch_settings(monkeypatch, alibaba_api_key="sk-alibaba-cn")
+    with respx.mock(assert_all_called=False) as mock:
+        mock.get("https://dashscope-intl.aliyuncs.com/api/v1/models").respond(401)
+        mock.get("https://dashscope.aliyuncs.com/api/v1/models").respond(
+            200, json={"data": []}
+        )
         out = await accounts._check_alibaba()
-    assert out.error == "API key invalid"
+    assert out.configured is True
+    assert out.error is None
+
+
+@pytest.mark.asyncio
+async def test_alibaba_invalid_key_surfaces_vendor_message(monkeypatch):
+    """Both hosts reject the key -- surface the last vendor message in the
+    card error so the operator sees WHY DashScope didn't accept it.
+    """
+    _patch_settings(monkeypatch, alibaba_api_key="sk-sp-bad")
+    with respx.mock(assert_all_called=False) as mock:
+        mock.get("https://dashscope-intl.aliyuncs.com/api/v1/models").respond(
+            401, json={"code": "InvalidApiKey", "message": "Invalid API-key provided."}
+        )
+        mock.get("https://dashscope.aliyuncs.com/api/v1/models").respond(
+            401, json={"code": "InvalidApiKey", "message": "Invalid API-key provided."}
+        )
+        out = await accounts._check_alibaba()
+    assert out.configured is True
+    # We surface the vendor's exact message so the operator can tell at a
+    # glance whether it's a bad key vs. an account-region mismatch.
+    assert out.error is not None
+    assert "Invalid API-key" in out.error
 
 
 # ---------------------------------------------------------------------------
@@ -423,21 +518,20 @@ async def test_get_usage_returns_every_provider(monkeypatch):
                 ],
             },
         )
-        mock.get("https://api.anthropic.com/v1/organizations").respond(
-            200, json={"data": [{"id": "org-1"}]}
+        mock.get("https://api.anthropic.com/v1/organizations/me").respond(
+            200, json={"id": "org-1", "type": "organization", "name": "Test"}
         )
-        mock.get(
-            "https://api.anthropic.com/v1/organizations/org-1/billing/balance"
-        ).respond(200, json={"available_credit": 100})
+        mock.get("https://api.anthropic.com/v1/billing/balance").respond(
+            200, json={"available_credit": 100}
+        )
         mock.get("https://api.openai.com/v1/dashboard/billing/credit_grants").respond(
             200, json={"total_granted": 1, "total_used": 0, "total_available": 1}
         )
         mock.get("https://api.deepseek.com/user/balance").respond(
             200, json={"balance_infos": [{"currency": "USD", "total_balance": "1"}]}
         )
-        # Alibaba: free metadata endpoint, NOT the billable text-generation
-        # endpoint (would cost real tokens per refresh).
-        mock.get(url__regex=r"https://dashscope\.aliyuncs\.com/api/v1/models").respond(
+        # Alibaba: international endpoint accepts first, no fallthrough.
+        mock.get("https://dashscope-intl.aliyuncs.com/api/v1/models").respond(
             200, json={"data": []}
         )
 
