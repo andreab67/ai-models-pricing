@@ -136,6 +136,24 @@ class QuotaWindow(BaseModel):
     remaining_percent: float
 
 
+class AccountBalance(BaseModel):
+    """Remaining balance of one account under a provider key.
+
+    One Kilo key can spend from the personal account and from each
+    organization it belongs to; each has its own balance, so the dashboard
+    lists them per account rather than summing them into one figure.
+
+    Attributes:
+        name: account label ("Personal" or the organization name)
+        balance_usd: remaining balance in USD
+        depleted: vendor reports the balance as exhausted
+    """
+
+    name: str
+    balance_usd: float
+    depleted: bool = False
+
+
 class AccountProviderUsage(BaseModel):
     provider: Literal[
         "openrouter",
@@ -164,6 +182,8 @@ class AccountProviderUsage(BaseModel):
     remaining_percent: float | None = None
     plan_models: list[str] | None = None
     quota_windows: list[QuotaWindow] | None = None
+    # Per-account remaining balances (Kilo: personal + each organization).
+    balances: list[AccountBalance] | None = None
     # Credit composition (DeepSeek exposes this in /user/balance). When set,
     # the dashboard shows the paid / free split so the operator knows
     # whether the remaining balance is topped-up cash or free credits.

@@ -204,6 +204,8 @@ export interface AccountProviderUsage {
   remaining_percent: number | null;
   plan_models: string[] | null;
   quota_windows: QuotaWindow[] | null;
+  // Per-account remaining balances (Kilo: personal + each organization).
+  balances: AccountBalance[] | null;
   // Credit composition (DeepSeek). When set, the dashboard renders the
   // paid-vs-free split so the operator can tell whether the remaining
   // balance is topped-up cash or free credits.
@@ -222,6 +224,12 @@ export interface QuotaWindow {
   usage: number;
   limit: number;
   remaining_percent: number;
+}
+
+export interface AccountBalance {
+  name: string;
+  balance_usd: number;
+  depleted: boolean;
 }
 
 export interface AccountsUsage {

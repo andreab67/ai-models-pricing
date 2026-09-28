@@ -20,10 +20,6 @@ interface ProviderMeta {
   label: string;
   accent: string;
   description: string;
-  // Overrides the "Limit" row label. Kilo's denominator is lifetime credits
-  // acquired, not a spending cap, so calling it "Limit" would reintroduce
-  // the same misreading that produced the bogus balance earlier.
-  limitLabel?: string;
 }
 
 const META: Record<ProviderId, ProviderMeta> = {
@@ -35,8 +31,7 @@ const META: Record<ProviderId, ProviderMeta> = {
   kilo: {
     label: "Kilo",
     accent: "text-cyan-400",
-    description: "Kilo Code lifetime credit + model access",
-    limitLabel: "Acquired",
+    description: "Kilo Code remaining balance per account",
   },
   openrouter: {
     label: "OpenRouter",
@@ -56,6 +51,11 @@ const META: Record<ProviderId, ProviderMeta> = {
 // providers share the same compact status grid below.
 const PRIMARY: ProviderId = "openrouter";
 const REST_ORDER: ProviderId[] = ["minimax", "kilo", "deepseek"];
+
+// Color for a remaining USD balance: red under $5, yellow under $20.
+function balanceColor(usd: number): string {
+  return usd < 5 ? "text-red-400" : usd < 20 ? "text-yellow-400" : "text-emerald-400";
+}
 
 // ---------------------------------------------------------------------------
 // Shared card body. Each provider renders the same status grid: plan, used,
@@ -119,7 +119,7 @@ function ProviderCard({
         </p>
       ) : account.error ? (
         <p className="text-xs text-red-400">{account.error}</p>
-      ) : account.spent_usd == null && account.remaining_usd == null && account.usage_count == null && !account.quota_windows?.length ? (
+      ) : account.spent_usd == null && account.remaining_usd == null && account.usage_count == null && !account.quota_windows?.length && !account.balances?.length ? (
         <p className="text-xs text-emerald-400">Key active</p>
       ) : account.quota_windows && account.quota_windows.length > 0 ? (
         // MiniMax view: render each quota window as its own row. Each entry
@@ -134,9 +134,9 @@ function ProviderCard({
                 : w.remaining_percent < 50
                   ? "text-yellow-400"
                   : "text-emerald-400";
-            // limit=0 means the quota is "unlimited" -- the vendor returns
-            // usage=0 too. Show the percent but skip the "/limit" suffix
-            // so we don't render a misleading "0/0".
+            // limit=0 means the vendor reports no request cap for this
+            // window (usage=0 too). Show the percent alone rather than a
+            // misleading "0/0".
             const showLimit = w.limit > 0;
             return (
               <div
@@ -155,13 +155,25 @@ function ProviderCard({
                       {w.usage}/{w.limit}
                     </span>
                   )}
-                  {!showLimit && (
-                    <span className="text-muted/60 ml-2">unlimited</span>
-                  )}
                 </span>
               </div>
             );
           })}
+        </div>
+      ) : account.balances && account.balances.length > 0 ? (
+        // Kilo view: one remaining-balance row per account (personal, then
+        // each organization) -- what is left to spend, not lifetime totals.
+        <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
+          {account.balances.map((b, i) => (
+            <div key={`${b.name}-${i}`} className="contents">
+              <span className="text-muted">{b.name}</span>
+              <span
+                className={`text-right font-mono font-semibold ${balanceColor(b.balance_usd)}`}
+              >
+                {fmtUsd(b.balance_usd)}
+              </span>
+            </div>
+          ))}
         </div>
       ) : account.usage_count != null || account.usage_limit != null || account.remaining_percent != null ? (
         // Legacy non-USD view (no per-window breakdown available).
@@ -222,7 +234,7 @@ function ProviderCard({
             {account.limit_usd != null && (
               <>
                 <span className="text-muted">
-                  {meta.limitLabel ?? "Limit"}
+                  Limit
                   {account.currency ? ` (${account.currency})` : ""}
                 </span>
                 <span className="text-right font-mono">
@@ -237,13 +249,7 @@ function ProviderCard({
                   Remaining{account.currency ? ` (${account.currency})` : ""}
                 </span>
                 <span
-                  className={`text-right font-mono font-semibold ${
-                    account.remaining_usd < 5
-                      ? "text-red-400"
-                      : account.remaining_usd < 20
-                        ? "text-yellow-400"
-                        : "text-emerald-400"
-                  }`}
+                  className={`text-right font-mono font-semibold ${balanceColor(account.remaining_usd)}`}
                 >
                   {fmtUsd(account.remaining_usd)}
                 </span>

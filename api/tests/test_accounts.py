@@ -86,88 +86,188 @@ async def test_kilo_unconfigured(monkeypatch):
     assert out.configured is False
 
 
+_KILO_ORG = "35483631-2eab-48f3-be3e-20e54ca2dbf9"
+_KILO_PROFILE = "https://api.kilo.ai/api/profile"
+_KILO_BALANCE = "https://api.kilo.ai/api/profile/balance"
+
+
+def _kilo_models(mock):
+    # kilo_base_url is https://api.kilo.ai/api/gateway in the default config
+    mock.get("https://api.kilo.ai/api/gateway/models").respond(
+        200, json={"data": [{"id": "m1"}, {"id": "m2"}]}
+    )
+
+
+def _kilo_org_balance(mock, **respond):
+    # Registered BEFORE the personal route: respx matches routes in order, and
+    # the personal route (no header pattern) would also match org requests.
+    return mock.get(
+        _KILO_BALANCE, headers={"x-kilocode-organizationid": _KILO_ORG}
+    ).respond(**respond)
+
+
 @pytest.mark.asyncio
-async def test_kilo_models_and_user_parsed(monkeypatch):
-    """Live shape: gateway /models + cloud /api/user (microdollar counts).
+async def test_kilo_personal_and_org_balances(monkeypatch):
+    """Live shape (2026-09-28): one balance row per account.
 
-    Remaining credit is ``total_microdollars_acquired - microdollars_used``
-    = 349.05 - 325.27 = $23.78, which is exactly what the Kilo console shows
-    as "Remaining Personal Credits".
-
-    ``kilo_pass_threshold`` is deliberately NOT used: it is the Kilo Pass
-    spend threshold, not a budget, so using it as a limit produced a
-    fabricated $16.35 remaining.
+    Personal comes from /api/profile/balance with no org header; each
+    organization from the same endpoint with x-kilocode-organizationid --
+    the calls the Kilo Code extension makes. Lifetime counters are gone.
     """
     _patch_settings(monkeypatch, kilo_api_key="sk-kilo")
-    with respx.mock(assert_all_called=False) as mock:
-        # kilo_base_url is https://api.kilo.ai/api/gateway in the default config
-        mock.get("https://api.kilo.ai/api/gateway/models").respond(
-            200, json={"data": [{"id": "m1"}, {"id": "m2"}]}
-        )
-        mock.get("https://app.kilo.ai/api/user").respond(
+    with respx.mock() as mock:
+        _kilo_models(mock)
+        mock.get(_KILO_PROFILE).respond(
             200,
             json={
-                "microdollars_used": 325265679,
-                "kilo_pass_threshold": 341619360,
-                "total_microdollars_acquired": 349050000,
+                "user": {"id": "u1"},
+                "organizations": [
+                    {"id": _KILO_ORG, "name": "Green Yoga Inc", "role": "owner"}
+                ],
+                "hasPersonalAccount": True,
+                "selectedOrganizationId": _KILO_ORG,
             },
+        )
+        org = _kilo_org_balance(
+            mock, status_code=200, json={"balance": 9.94258, "isDepleted": False}
+        )
+        personal = mock.get(_KILO_BALANCE).respond(
+            200, json={"balance": 23.783667, "isDepleted": False}
         )
         out = await accounts._check_kilo()
     assert out.configured is True
-    assert out.model_count == 2
-    assert out.spent_usd == pytest.approx(325.2657, abs=1e-3)
-    # The limit is the LIFETIME credits acquired, not the pass threshold.
-    assert out.limit_usd == pytest.approx(349.05, abs=1e-3)
-    # 349.05 - 325.27 = 23.78, matching the console's Remaining Personal Credits.
-    # NOTE: this also pins that the pass threshold (341.62) is NOT the limit --
-    # a revert to that field would fail this ~$7.27 away.
-    assert out.remaining_usd == pytest.approx(23.7843, abs=1e-3)
-    assert out.plan == "Lifetime credit"
     assert out.error is None
-
-
-@pytest.mark.asyncio
-async def test_kilo_pass_threshold_is_not_a_limit(monkeypatch):
-    """A user object that carries only the pass threshold must not produce a
-    limit/remaining pair -- there is no real denominator to compute against,
-    so the card reports spend alone rather than a fabricated balance.
-    """
-    _patch_settings(monkeypatch, kilo_api_key="sk-kilo")
-    with respx.mock(assert_all_called=False) as mock:
-        mock.get("https://api.kilo.ai/api/gateway/models").respond(
-            200, json={"data": [{"id": "m"}]}
-        )
-        mock.get("https://app.kilo.ai/api/user").respond(
-            200,
-            json={
-                "microdollars_used": 325265679,
-                "kilo_pass_threshold": 341619360,
-            },
-        )
-        out = await accounts._check_kilo()
-    assert out.spent_usd == pytest.approx(325.2657, abs=1e-3)
-    assert out.limit_usd is None
-    assert out.remaining_usd is None
-
-
-@pytest.mark.asyncio
-async def test_kilo_user_endpoint_unreachable_omits_balance(monkeypatch):
-    """If the cloud user endpoint is unreachable (network error or 4xx)
-    we still show model count, and we do NOT invent a balance.
-    """
-    _patch_settings(monkeypatch, kilo_api_key="sk-kilo")
-    with respx.mock(assert_all_called=False) as mock:
-        mock.get("https://api.kilo.ai/api/gateway/models").respond(
-            200, json={"data": [{"id": "m"}]}
-        )
-        mock.get("https://app.kilo.ai/api/user").respond(503)
-        out = await accounts._check_kilo()
-    assert out.configured is True
-    assert out.model_count == 1
-    # No spent/limit surfaced when the cloud endpoint fails.
+    assert out.warning is None
+    assert out.model_count == 2
+    assert [(b.name, b.balance_usd, b.depleted) for b in out.balances] == [
+        ("Personal", pytest.approx(23.7837, abs=1e-4), False),
+        ("Green Yoga Inc", pytest.approx(9.9426, abs=1e-4), False),
+    ]
+    assert "x-kilocode-organizationid" not in personal.calls.last.request.headers
+    assert org.calls.last.request.headers["x-kilocode-organizationid"] == _KILO_ORG
+    # No lifetime figures: those rendered as "Used / Acquired" on the card.
     assert out.spent_usd is None
     assert out.limit_usd is None
     assert out.remaining_usd is None
+    assert out.plan is None
+
+
+@pytest.mark.asyncio
+async def test_kilo_profile_failure_still_reports_personal(monkeypatch):
+    """The personal balance needs no org id, so a failed profile call must
+    not hide it -- only the organization rows are lost.
+    """
+    _patch_settings(monkeypatch, kilo_api_key="sk-kilo")
+    with respx.mock() as mock:
+        _kilo_models(mock)
+        mock.get(_KILO_PROFILE).respond(503)
+        mock.get(_KILO_BALANCE).respond(
+            200, json={"balance": 23.78, "isDepleted": False}
+        )
+        out = await accounts._check_kilo()
+    assert [b.name for b in out.balances] == ["Personal"]
+    assert out.error is None
+    # The missing org rows are flagged, not silently absent.
+    assert out.warning == "Organization balances unavailable"
+
+
+@pytest.mark.asyncio
+async def test_kilo_one_org_balance_failing_is_flagged(monkeypatch):
+    """One account's balance call failing while others succeed must name
+    that account in the warning -- it may be the one running out.
+    """
+    _patch_settings(monkeypatch, kilo_api_key="sk-kilo")
+    with respx.mock() as mock:
+        _kilo_models(mock)
+        mock.get(_KILO_PROFILE).respond(
+            200,
+            json={
+                "organizations": [{"id": _KILO_ORG, "name": "Green Yoga Inc"}],
+                "hasPersonalAccount": True,
+            },
+        )
+        _kilo_org_balance(mock, status_code=500)
+        mock.get(_KILO_BALANCE).respond(
+            200, json={"balance": 23.78, "isDepleted": False}
+        )
+        out = await accounts._check_kilo()
+    assert [b.name for b in out.balances] == ["Personal"]
+    assert out.error is None
+    assert out.warning == "Balance unavailable: Green Yoga Inc"
+
+
+@pytest.mark.asyncio
+async def test_kilo_no_personal_account_lists_orgs_only(monkeypatch):
+    _patch_settings(monkeypatch, kilo_api_key="sk-kilo")
+    with respx.mock(assert_all_called=False) as mock:
+        _kilo_models(mock)
+        mock.get(_KILO_PROFILE).respond(
+            200,
+            json={
+                "organizations": [{"id": _KILO_ORG, "name": "Green Yoga Inc"}],
+                "hasPersonalAccount": False,
+            },
+        )
+        _kilo_org_balance(mock, status_code=200, json={"balance": 5})
+        personal = mock.get(_KILO_BALANCE).respond(200, json={"balance": 99})
+        out = await accounts._check_kilo()
+    assert [b.name for b in out.balances] == ["Green Yoga Inc"]
+    assert not personal.called
+
+
+@pytest.mark.asyncio
+async def test_kilo_depleted_account_warns(monkeypatch):
+    _patch_settings(monkeypatch, kilo_api_key="sk-kilo")
+    with respx.mock() as mock:
+        _kilo_models(mock)
+        mock.get(_KILO_PROFILE).respond(
+            200,
+            json={
+                "organizations": [{"id": _KILO_ORG, "name": "Green Yoga Inc"}],
+                "hasPersonalAccount": True,
+            },
+        )
+        _kilo_org_balance(
+            mock, status_code=200, json={"balance": 0, "isDepleted": True}
+        )
+        mock.get(_KILO_BALANCE).respond(
+            200, json={"balance": 23.78, "isDepleted": False}
+        )
+        out = await accounts._check_kilo()
+    # A warning, not an error: the other account's balance must stay visible.
+    assert out.error is None
+    assert out.warning == "Balance depleted: Green Yoga Inc"
+    assert len(out.balances) == 2
+
+
+@pytest.mark.parametrize(
+    "respond",
+    [
+        {"status_code": 503},
+        {"status_code": 200, "json": {"isDepleted": False}},
+        {"status_code": 200, "json": {"balance": "NaN"}},
+        {"status_code": 200, "json": {"balance": "n/a"}},
+    ],
+    ids=["http-503", "missing", "non-finite", "non-numeric"],
+)
+@pytest.mark.asyncio
+async def test_kilo_unusable_balance_is_not_fabricated(monkeypatch, respond):
+    """A failed or malformed balance is dropped, never rendered as $0 --
+    a fabricated zero would read as "account empty".
+    """
+    _patch_settings(monkeypatch, kilo_api_key="sk-kilo")
+    with respx.mock() as mock:
+        _kilo_models(mock)
+        mock.get(_KILO_PROFILE).respond(
+            200, json={"organizations": [], "hasPersonalAccount": True}
+        )
+        mock.get(_KILO_BALANCE).respond(**respond)
+        out = await accounts._check_kilo()
+    assert out.configured is True
+    assert out.error is None
+    assert out.balances is None
+    assert out.warning == "Balance unavailable"
+    assert out.model_count == 2
 
 
 @pytest.mark.asyncio
@@ -470,31 +570,6 @@ async def test_deepseek_no_balance_infos(monkeypatch):
     assert out.error is None
 
 
-@pytest.mark.asyncio
-async def test_kilo_acquired_without_used(monkeypatch):
-    """Credits acquired but nothing spent yet: limit surfaces, remaining
-    equals the full acquired amount.
-    """
-    _patch_settings(monkeypatch, kilo_api_key="sk-kilo")
-    with respx.mock(assert_all_called=False) as mock:
-        mock.get("https://api.kilo.ai/api/gateway/models").respond(
-            200, json={"data": [{"id": "m"}]}
-        )
-        mock.get("https://app.kilo.ai/api/user").respond(
-            200,
-            json={
-                "microdollars_used": 0,
-                "total_microdollars_acquired": 20000000,
-            },
-        )
-        out = await accounts._check_kilo()
-    assert out.limit_usd == pytest.approx(20.0, abs=1e-3)
-    assert out.remaining_usd == pytest.approx(20.0, abs=1e-3)
-    # The label must survive the zero-spend path too -- it is what tells the
-    # operator these are lifetime figures rather than this month's budget.
-    assert out.plan == "Lifetime credit"
-
-
 # ---------------------------------------------------------------------------
 # Aggregate: get_usage() returns every provider's record
 # ---------------------------------------------------------------------------
@@ -522,13 +597,11 @@ async def test_get_usage_returns_every_provider(monkeypatch):
         mock.get(url__regex=r"https://api\.kilo\.ai.*/models").respond(
             200, json={"data": [{"id": "m"}]}
         )
-        # Kilo Cloud user endpoint -- microdollar counts.
-        mock.get("https://app.kilo.ai/api/user").respond(
-            200,
-            json={
-                "microdollars_used": 325265679,
-                "kilo_pass_threshold": 341619360,
-            },
+        mock.get("https://api.kilo.ai/api/profile").respond(
+            200, json={"organizations": [], "hasPersonalAccount": True}
+        )
+        mock.get("https://api.kilo.ai/api/profile/balance").respond(
+            200, json={"balance": 23.78, "isDepleted": False}
         )
         mock.get(url__regex=r"https://api\.minimax\.(chat|io).*coding_plan.*").respond(
             200,

@@ -19,6 +19,7 @@ import httpx
 from app.config import get_settings
 from app.logging import get_logger
 from app.schemas import (
+    AccountBalance,
     AccountProviderUsage,
     AccountsUsage,
     ActivityResponse,
@@ -105,34 +106,56 @@ async def _check_openrouter() -> AccountProviderUsage:
             )
 
 
+async def _kilo_balance(
+    client: httpx.AsyncClient,
+    origin: str,
+    key: str,
+    name: str,
+    org_id: str | None,
+) -> AccountBalance | None:
+    """One account's balance from ``/api/profile/balance``, or None on failure.
+
+    A missing, non-numeric or non-finite balance yields None rather than
+    $0 -- a fabricated zero would read as "account empty".
+    """
+    headers = {"Authorization": f"Bearer {key}"}
+    if org_id:
+        headers["x-kilocode-organizationid"] = org_id
+    try:
+        resp = await client.get(
+            f"{origin}/api/profile/balance", headers=headers, timeout=6.0
+        )
+        resp.raise_for_status()
+        body = resp.json() or {}
+        balance = float(body["balance"])
+        if not math.isfinite(balance):
+            raise ValueError(f"non-finite balance {body['balance']!r}")
+    except Exception as exc:
+        log.warning("kilo_balance_failed", account=name, error=str(exc))
+        return None
+    return AccountBalance(
+        name=name,
+        balance_usd=round(balance, 4),
+        depleted=body.get("isDepleted") is True,
+    )
+
+
 async def _check_kilo() -> AccountProviderUsage:
-    """Kilo Pass usage probe.
+    """Kilo remaining balance, per account.
 
-    Two API surfaces are useful here:
+    Uses the same calls the Kilo Code extension makes to show its balance:
 
-    1. The gateway ``/models`` endpoint on ``api.kilo.ai`` returns the
-       list of accessible models -- surface the count.
-    2. The Cloud user object on ``app.kilo.ai/api/user`` returns lifetime
-       microdollar counts (``microdollars_used``,
-       ``total_microdollars_acquired``). Microdollars are 1e-6 USD.
+    1. The gateway ``/models`` endpoint validates the key and gives the
+       model count.
+    2. ``GET /api/profile`` lists the organizations the key belongs to and
+       whether it has a personal account.
+    3. ``GET /api/profile/balance`` returns ``{"balance", "isDepleted"}``
+       for the personal account; with an ``x-kilocode-organizationid``
+       header it returns that organization's balance instead.
 
-    Remaining credit is ``total_microdollars_acquired - microdollars_used``.
-    That is the same figure the Kilo console shows as "Remaining Personal
-    Credits" -- verified against the live console at 349.05 - 325.27 =
-    $23.78.
-
-    Do NOT use ``kilo_pass_threshold`` as a limit. It is the spend level at
-    which Kilo Pass benefits kick in, NOT a budget: it is unrelated to the
-    credit balance, so ``threshold - used`` renders a confident, completely
-    fabricated "remaining" figure. An earlier revision did exactly that and
-    showed $16.35 where the console showed $23.78.
-
-    The console's per-cycle *Personal workspace* breakdown (this month's
-    usage / paid / available bonus / renews-in-N-days) is only fetched by
-    the Cloud console's client-side React fetch -- it requires a browser
-    session cookie, not the API key. Kilo does not expose that surface
-    publicly, so the card reports lifetime credit rather than this month's
-    allowance.
+    Each account is reported on its own row. Lifetime counters from
+    ``app.kilo.ai/api/user`` (``microdollars_used`` and friends) are not
+    used: they describe history, not what is left to spend.
     """
     key = _settings.kilo_api_key
 
@@ -159,53 +182,68 @@ async def _check_kilo() -> AccountProviderUsage:
             resp.raise_for_status()
             model_count = len(resp.json().get("data") or [])
 
-            # Cloud API: lifetime personal credit, returned in microdollars.
-            # The per-cycle "Personal workspace" breakdown the console shows is
-            # browser-session-only and unreachable with an API key, so the card
-            # reports lifetime rather than this month's allowance. The 6s
-            # timeout here is generous; on normal hits this is <500ms.
+            # Profile/balance live on the gateway's origin (api.kilo.ai),
+            # not under its /api/gateway path.
+            base = httpx.URL(_settings.kilo_base_url)
+            origin = f"{base.scheme}://{base.netloc.decode()}"
+            accounts_to_check: list[tuple[str, str | None]] = [("Personal", None)]
+            profile_failed = False
             try:
-                user_resp = await client.get(
-                    "https://app.kilo.ai/api/user",
-                    headers={
-                        "Authorization": f"Bearer {key}",
-                        "Accept": "application/json",
-                    },
+                prof_resp = await client.get(
+                    f"{origin}/api/profile",
+                    headers={"Authorization": f"Bearer {key}"},
                     timeout=6.0,
                 )
+                prof_resp.raise_for_status()
+                profile = prof_resp.json() or {}
+                if profile.get("hasPersonalAccount") is False:
+                    accounts_to_check = []
+                accounts_to_check += [
+                    (str(o.get("name") or o["id"]), str(o["id"]))
+                    for o in profile.get("organizations") or []
+                    if isinstance(o, dict) and o.get("id")
+                ]
             except Exception as exc:
-                log.warning("kilo_user_fetch_failed", error=str(exc))
-                user_resp = None
+                # Without the profile we cannot enumerate organizations, but
+                # the personal balance needs no org id -- still report it.
+                log.warning("kilo_profile_failed", error=str(exc))
+                profile_failed = True
 
-            spent_usd: float | None = None
-            limit_usd: float | None = None
-            if user_resp is not None and user_resp.status_code == 200:
-                user = user_resp.json() or {}
-                spent_raw = user.get("microdollars_used")
-                acquired_raw = user.get("total_microdollars_acquired")
-                if spent_raw is not None:
-                    spent_usd = round(float(spent_raw) / 1_000_000, 4)
-                if acquired_raw is not None:
-                    # Lifetime credits acquired is the real denominator:
-                    # remaining = acquired - used is the console's
-                    # "Remaining Personal Credits" figure.
-                    limit_usd = round(float(acquired_raw) / 1_000_000, 4)
+            results = await asyncio.gather(
+                *(
+                    _kilo_balance(client, origin, key, name, org_id)
+                    for name, org_id in accounts_to_check
+                )
+            )
+            balances = [b for b in results if b is not None]
+            depleted = [b.name for b in balances if b.depleted]
+            # A dropped row must say so: silently omitting an account would
+            # hide the very one that might be running out.
+            failed = [
+                name
+                for (name, _), b in zip(accounts_to_check, results, strict=True)
+                if b is None
+            ]
+
+            problems: list[str] = []
+            if depleted:
+                problems.append(f"Balance depleted: {', '.join(depleted)}")
+            if failed:
+                problems.append(f"Balance unavailable: {', '.join(failed)}")
+            if profile_failed:
+                problems.append("Organization balances unavailable")
+            warning = (
+                "; ".join(problems) if balances else "Balance unavailable"
+            ) or None
 
             return AccountProviderUsage(
                 provider="kilo",
                 configured=True,
                 currency="USD",
-                spent_usd=spent_usd,
-                limit_usd=limit_usd,
-                remaining_usd=round(limit_usd - spent_usd, 4)
-                if (spent_usd is not None and limit_usd is not None)
-                else None,
+                balances=balances or None,
                 model_count=model_count or None,
+                warning=warning,
                 error=None,
-                # Kilo exposes no per-cycle allowance via the API key, so we
-                # label the numbers as lifetime credit rather than implying
-                # they are this month's budget.
-                plan="Lifetime credit" if spent_usd is not None else None,
             )
         except Exception as exc:
             log.warning("kilo_check_failed", error=str(exc))
