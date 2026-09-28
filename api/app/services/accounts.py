@@ -575,27 +575,6 @@ async def _check_alibaba() -> AccountProviderUsage:
             )
 
 
-async def _check_cursor() -> AccountProviderUsage:
-    """Cursor IDE usage.
-
-    Cursor does not expose a public REST endpoint for personal usage — usage
-    is only visible in the desktop client or the ``cursor.com`` settings page
-    behind browser auth. The dashboard card is therefore always a deep link to
-    the operator's own settings page; ``configured`` simply means we know who
-    the account belongs to (email + plan optional via env vars).
-    """
-    email = _settings.cursor_email or ""
-    plan = _settings.cursor_plan or None
-    configured = bool(email)
-    return AccountProviderUsage(
-        provider="cursor",
-        configured=configured,
-        plan=plan,
-        dashboard_url="https://www.cursor.com/settings",
-        error=None if configured else "set CURSOR_EMAIL to track this account",
-    )
-
-
 _ACTIVITY_CACHE_KEY = "accounts:activity"
 _ACTIVITY_CACHE_TTL = 900  # 15 min
 
@@ -673,7 +652,7 @@ async def get_usage() -> AccountsUsage:
     if cached:
         return AccountsUsage.model_validate(cached)
 
-    openrouter, kilo, minimax, anthropic, openai, deepseek, alibaba, cursor = (
+    openrouter, kilo, minimax, anthropic, openai, deepseek, alibaba = (
         await asyncio.gather(
             _check_openrouter(),
             _check_kilo(),
@@ -682,7 +661,6 @@ async def get_usage() -> AccountsUsage:
             _check_openai(),
             _check_deepseek(),
             _check_alibaba(),
-            _check_cursor(),
             return_exceptions=False,
         )
     )
@@ -694,7 +672,6 @@ async def get_usage() -> AccountsUsage:
         openai=openai,
         deepseek=deepseek,
         alibaba=alibaba,
-        cursor=cursor,
         fetched_at=datetime.now(UTC),
     )
     await cache.set(_CACHE_KEY, result.model_dump(mode="json"), ttl=_CACHE_TTL)

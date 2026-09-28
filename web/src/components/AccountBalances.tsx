@@ -57,16 +57,11 @@ const META: Record<ProviderId, ProviderMeta> = {
     accent: "text-sky-400",
     description: "DeepSeek user balance (USD)",
   },
-  cursor: {
-    label: "Cursor",
-    accent: "text-fuchsia-400",
-    description: "Cursor IDE usage (deep-link to console)",
-  },
 };
 
 // OpenRouter sits alone at the top because it's the only provider whose card
 // carries a per-model activity subtable — that table reads horizontally and
-// doesn't fit cleanly inside a 1/3-width column. The remaining seven
+// doesn't fit cleanly inside a 1/3-width column. The remaining six
 // providers share the same compact status grid below.
 const PRIMARY: ProviderId = "openrouter";
 const REST_ORDER: ProviderId[] = [
@@ -76,7 +71,6 @@ const REST_ORDER: ProviderId[] = [
   "anthropic",
   "openai",
   "deepseek",
-  "cursor",
 ];
 
 // ---------------------------------------------------------------------------

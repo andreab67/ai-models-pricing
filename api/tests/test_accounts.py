@@ -351,33 +351,6 @@ async def test_alibaba_invalid_key_reports_error(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# Cursor
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_cursor_unconfigured(monkeypatch):
-    _patch_settings(monkeypatch, cursor_email="", cursor_plan="")
-    out = await accounts._check_cursor()
-    assert out.configured is False
-    assert out.error is not None  # tells the operator to set CURSOR_EMAIL
-
-
-@pytest.mark.asyncio
-async def test_cursor_configured_links_to_settings(monkeypatch):
-    _patch_settings(monkeypatch, cursor_email="a@x.com", cursor_plan="Pro")
-    out = await accounts._check_cursor()
-    assert out.configured is True
-    assert out.plan == "Pro"
-    assert "cursor.com/settings" in (out.dashboard_url or "")
-    # The email MUST NOT leak into the URL -- it would flow through browser
-    # history, the Referer header on third-party requests, and Cursor's own
-    # server logs. Cursor's settings page also doesn't honor ?email=, so the
-    # query string has no UX value.
-    assert "email=" not in (out.dashboard_url or "")
-
-
-# ---------------------------------------------------------------------------
 # Aggregate: get_usage() returns every provider's record
 # ---------------------------------------------------------------------------
 
@@ -393,8 +366,6 @@ async def test_get_usage_returns_every_provider(monkeypatch):
         openai_admin_key="sk-admin",
         deepseek_api_key="sk-ds",
         alibaba_api_key="sk-alb",
-        cursor_email="a@x.com",
-        cursor_plan="Pro",
     )
     # Reset the cache so the test does not return a stale dict from a
     # previous run; the in-memory fallback would otherwise memoize.
@@ -450,7 +421,7 @@ async def test_get_usage_returns_every_provider(monkeypatch):
     # where every checker swallows a real failure and the dashboard looks fine.
     for name in (
         "openrouter", "kilo", "minimax", "anthropic",
-        "openai", "deepseek", "alibaba", "cursor",
+        "openai", "deepseek", "alibaba",
     ):
         rec = getattr(out, name)
         assert rec.configured is True, f"{name}: not configured ({rec.error!r})"

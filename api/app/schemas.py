@@ -121,7 +121,6 @@ class AccountProviderUsage(BaseModel):
         "openai",
         "deepseek",
         "alibaba",
-        "cursor",
     ]
     configured: bool = False
     plan: str | None = None
@@ -154,7 +153,6 @@ class AccountsUsage(BaseModel):
     openai: AccountProviderUsage
     deepseek: AccountProviderUsage
     alibaba: AccountProviderUsage
-    cursor: AccountProviderUsage
     fetched_at: datetime
 
 

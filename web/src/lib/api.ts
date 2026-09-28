@@ -120,8 +120,7 @@ export interface AccountProviderUsage {
     | "anthropic"
     | "openai"
     | "deepseek"
-    | "alibaba"
-    | "cursor";
+    | "alibaba";
   configured: boolean;
   plan: string | null;
   limit_usd: number | null;
@@ -150,7 +149,6 @@ export interface AccountsUsage {
   openai: AccountProviderUsage;
   deepseek: AccountProviderUsage;
   alibaba: AccountProviderUsage;
-  cursor: AccountProviderUsage;
   fetched_at: string;
 }
 
