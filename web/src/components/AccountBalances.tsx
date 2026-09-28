@@ -138,11 +138,43 @@ function ProviderCard({
         </div>
       ) : account.error ? (
         <p className="text-xs text-red-400">{account.error}</p>
-      ) : account.spent_usd == null && account.remaining_usd == null && account.usage_count == null ? (
+      ) : account.spent_usd == null && account.remaining_usd == null && account.usage_count == null && !account.quota_windows?.length ? (
         <p className="text-xs text-emerald-400">Key active</p>
+      ) : account.quota_windows && account.quota_windows.length > 0 ? (
+        // MiniMax view: render each quota window as its own row. Each entry
+        // is one slice of the plan's allowance (e.g. "general 5h", "general
+        // weekly", "video 5h") so the operator sees every quota on its own
+        // line instead of a single worst-case aggregate.
+        <div className="space-y-1.5">
+          {account.quota_windows.map((w, i) => {
+            const pctColor =
+              w.remaining_percent < 20
+                ? "text-red-400"
+                : w.remaining_percent < 50
+                  ? "text-yellow-400"
+                  : "text-emerald-400";
+            return (
+              <div
+                key={`${w.name}-${w.period}-${i}`}
+                className="flex items-center justify-between text-sm"
+              >
+                <span className="text-muted">
+                  {w.name} <span className="text-muted/60">({w.period})</span>
+                </span>
+                <span className="font-mono">
+                  <span className={`font-semibold ${pctColor}`}>
+                    {w.remaining_percent.toFixed(1)}%
+                  </span>
+                  <span className="text-muted/70 ml-2">
+                    {w.usage}/{w.limit}
+                  </span>
+                </span>
+              </div>
+            );
+          })}
+        </div>
       ) : account.usage_count != null || account.usage_limit != null || account.remaining_percent != null ? (
-        // Non-USD view: MiniMax returns request counts and a remaining
-        // percent per plan window, not dollar amounts.
+        // Legacy non-USD view (no per-window breakdown available).
         <>
           <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
             <span className="text-muted">
@@ -175,24 +207,7 @@ function ProviderCard({
                 </span>
               </>
             )}
-
-            {account.plan_models && account.plan_models.length > 0 && (
-              <>
-                <span className="text-muted">Plans</span>
-                <span className="text-right text-fg/70 font-mono text-xs">
-                  {account.plan_models.join(", ")}
-                </span>
-              </>
-            )}
           </div>
-
-          {account.remaining_percent != null && (
-            <p className="text-xs text-right text-muted">
-              {account.usage_count != null && account.usage_limit != null
-                ? `${account.usage_count.toLocaleString()} of ${account.usage_limit.toLocaleString()} ${account.currency ?? "reqs"} used`
-                : `lowest remaining percent across plans`}
-            </p>
-          )}
         </>
       ) : (
         <>

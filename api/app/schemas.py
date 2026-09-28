@@ -112,6 +112,30 @@ class KiloProjection(BaseModel):
     total_effective_credits_usd: float
 
 
+class QuotaWindow(BaseModel):
+    """One quota window within a provider's subscription.
+
+    MiniMax returns a ``model_remains`` array where each entry has BOTH a
+    5h interval (``current_interval_*``) and a weekly (``current_weekly_*``)
+    counter for the same model. We expand each entry into 1-2 windows so
+    the dashboard can render each quota on its own row instead of
+    aggregating across them and reporting a misleading worst case.
+
+    Attributes:
+        name: short label for the row (e.g. "general", "video")
+        period: window label (e.g. "5h", "weekly")
+        usage: requests consumed in this window
+        limit: requests allowed in this window
+        remaining_percent: percent remaining in this window
+    """
+
+    name: str
+    period: str
+    usage: int
+    limit: int
+    remaining_percent: float
+
+
 class AccountProviderUsage(BaseModel):
     provider: Literal[
         "openrouter",
@@ -133,7 +157,7 @@ class AccountProviderUsage(BaseModel):
     currency: str | None = None
     dashboard_url: str | None = None
     # Non-USD usage fields. MiniMax tracks request counts and a remaining
-    # percent per plan window instead of dollar amounts; some Anthropic /
+    # percent per quota window instead of dollar amounts; some Anthropic /
     # OpenAI surfaces also expose usage counts alongside the credit-grant
     # window. These are populated when the vendor returns them and rendered
     # by the frontend only when present -- providers that report purely in
@@ -142,6 +166,7 @@ class AccountProviderUsage(BaseModel):
     usage_limit: int | None = None
     remaining_percent: float | None = None
     plan_models: list[str] | None = None
+    quota_windows: list[QuotaWindow] | None = None
     error: str | None = None
 
 

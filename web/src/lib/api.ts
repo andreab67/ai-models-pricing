@@ -132,13 +132,22 @@ export interface AccountProviderUsage {
   currency: string | null;
   dashboard_url: string | null;
   // Non-USD usage fields. MiniMax returns request counts and a remaining
-  // percent per plan window rather than USD amounts; we surface both shapes
+  // percent per quota window rather than USD amounts; we surface both shapes
   // here so the dashboard can render whichever the vendor provides.
   usage_count: number | null;
   usage_limit: number | null;
   remaining_percent: number | null;
   plan_models: string[] | null;
+  quota_windows: QuotaWindow[] | null;
   error: string | null;
+}
+
+export interface QuotaWindow {
+  name: string;
+  period: string;
+  usage: number;
+  limit: number;
+  remaining_percent: number;
 }
 
 export interface AccountsUsage {
