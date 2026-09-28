@@ -111,8 +111,10 @@ async def test_kilo_models_and_user_parsed(monkeypatch):
     assert out.spent_usd == pytest.approx(325.2657, abs=1e-3)
     assert out.limit_usd == pytest.approx(341.6194, abs=1e-3)
     assert out.remaining_usd == pytest.approx(16.3537, abs=1e-3)
-    # No plan badge -- the user wants numbers, not plan info.
-    assert out.plan is None
+    # The plan field is repurposed as the org-vs-personal scope label --
+    # the user object returns ORG-level numbers, so we surface "Org total"
+    # rather than leaving the badge blank.
+    assert out.plan == "Org total"
 
 
 @pytest.mark.asyncio
@@ -292,6 +294,42 @@ async def test_deepseek_unconfigured(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_deepseek_balance_parsed(monkeypatch):
+    """DeepSeek's /user/balance returns granted + topped_up separately so the
+    dashboard can show the paid / free breakdown.
+    """
+    _patch_settings(monkeypatch, deepseek_api_key="sk-deepseek")
+    with respx.mock(base_url="https://api.deepseek.com") as mock:
+        mock.get("/user/balance").respond(
+            200,
+            json={
+                "is_available": True,
+                "balance_infos": [
+                    {
+                        "currency": "USD",
+                        "total_balance": "12.34",
+                        "granted_balance": "10.00",
+                        "topped_up_balance": "5.00",
+                    }
+                ],
+            },
+        )
+        out = await accounts._check_deepseek()
+    assert out.configured is True
+    assert out.remaining_usd == pytest.approx(12.34)
+    # granted + topped_up - total = 15.00 - 12.34 = 2.66
+    assert out.spent_usd == pytest.approx(2.66)
+    assert out.currency == "USD"
+    # Credit composition breakdown.
+    assert out.granted_usd == pytest.approx(10.00)
+    assert out.topped_up_usd == pytest.approx(5.00)
+
+
+@pytest.mark.asyncio
+async def test_deepseek_spent_clamped_to_zero(monkeypatch):
+    """If the vendor returns a tiny floating-point overshoot (e.g.
+    granted + topped_up - total = -0.001), we clamp spent to 0 so the
+    card doesn't render a negative value.
+    """
     _patch_settings(monkeypatch, deepseek_api_key="sk-deepseek")
     with respx.mock(base_url="https://api.deepseek.com") as mock:
         mock.get("/user/balance").respond(
@@ -300,18 +338,47 @@ async def test_deepseek_balance_parsed(monkeypatch):
                 "balance_infos": [
                     {
                         "currency": "USD",
-                        "total_balance": "12.34",
-                        "granted_balance": "10.00",
+                        "total_balance": "5.00",
+                        "granted_balance": "0.00",
                         "topped_up_balance": "5.00",
                     }
                 ]
             },
         )
         out = await accounts._check_deepseek()
+    assert out.spent_usd == 0.0
+    assert out.remaining_usd == pytest.approx(5.00)
+
+
+@pytest.mark.asyncio
+async def test_kilo_org_total_relabeled(monkeypatch):
+    """When /api/user returns org-level numbers we label the plan badge as
+    'Org total' so the operator knows these are the *organization-wide*
+    figures, not their Personal Workspace view (which is browser-session-
+    only and unreachable via the API).
+    """
+    _patch_settings(monkeypatch, kilo_api_key="sk-kilo")
+    with respx.mock(assert_all_called=False) as mock:
+        mock.get("https://api.kilo.ai/api/gateway/models").respond(
+            200, json={"data": [{"id": "m"}]}
+        )
+        mock.get("https://app.kilo.ai/api/user").respond(
+            200,
+            json={
+                "microdollars_used": 325265679,
+                "kilo_pass_threshold": 341619360,
+                "total_microdollars_acquired": 349050000,
+            },
+        )
+        out = await accounts._check_kilo()
     assert out.configured is True
-    assert out.remaining_usd == pytest.approx(12.34)
-    assert out.spent_usd == pytest.approx(2.66)  # granted+topped_up - total
-    assert out.currency == "USD"
+    assert out.spent_usd == pytest.approx(325.2657, abs=1e-3)
+    assert out.limit_usd == pytest.approx(341.6194, abs=1e-3)
+    # Plan badge becomes the org-total label.
+    assert out.plan == "Org total"
+    # The honest "personal workspace not reachable" note is gone because
+    # we DID get numbers -- just org-level.
+    assert out.error is None
 
 
 # ---------------------------------------------------------------------------

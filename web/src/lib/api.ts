@@ -132,6 +132,11 @@ export interface AccountProviderUsage {
   remaining_percent: number | null;
   plan_models: string[] | null;
   quota_windows: QuotaWindow[] | null;
+  // Credit composition (DeepSeek). When set, the dashboard renders the
+  // paid-vs-free split so the operator can tell whether the remaining
+  // balance is topped-up cash or free credits.
+  granted_usd: number | null;
+  topped_up_usd: number | null;
   error: string | null;
 }
 

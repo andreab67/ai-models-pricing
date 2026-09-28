@@ -209,7 +209,9 @@ function ProviderCard({
 
             {account.remaining_usd != null && (
               <>
-                <span className="text-muted">Remaining</span>
+                <span className="text-muted">
+                  Remaining{account.currency ? ` (${account.currency})` : ""}
+                </span>
                 <span
                   className={`text-right font-mono font-semibold ${
                     account.remaining_usd < 5
@@ -223,13 +225,22 @@ function ProviderCard({
                 </span>
               </>
             )}
-          </div>
 
-          {usedPct != null && (
-            <p className={`text-xs text-right ${usedColor}`}>
-              {usedPct.toFixed(1)}% used
-            </p>
-          )}
+            {(account.granted_usd != null || account.topped_up_usd != null) && (
+              <>
+                <span className="text-muted">Paid</span>
+                <span className="text-right font-mono text-fg/80">
+                  {fmtUsd(account.topped_up_usd ?? 0)}
+                </span>
+                <span className="text-muted">Free credit</span>
+                <span className="text-right font-mono text-fg/80">
+                  {fmtUsd(account.granted_usd ?? 0)}
+                </span>
+              </>
+            )}
+
+            {children}
+          </div>
         </>
       )}
 
@@ -237,6 +248,8 @@ function ProviderCard({
     </div>
   );
 }
+
+// ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
 // OpenRouter card. Inherits the shared body and layers the per-model activity

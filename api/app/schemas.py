@@ -164,6 +164,11 @@ class AccountProviderUsage(BaseModel):
     remaining_percent: float | None = None
     plan_models: list[str] | None = None
     quota_windows: list[QuotaWindow] | None = None
+    # Credit composition (DeepSeek exposes this in /user/balance). When set,
+    # the dashboard shows the paid / free split so the operator knows
+    # whether the remaining balance is topped-up cash or free credits.
+    granted_usd: float | None = None
+    topped_up_usd: float | None = None
     error: str | None = None
 
 

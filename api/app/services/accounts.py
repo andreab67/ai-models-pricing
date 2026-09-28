@@ -118,8 +118,8 @@ async def _check_kilo() -> AccountProviderUsage:
     usage / paid / available bonus / renews-in-N-days) is only fetched by
     the Cloud console's client-side React fetch -- it requires a browser
     session cookie, not the API key. Kilo does not expose that surface
-    publicly. We surface that as an info note so the operator knows why
-    the card looks lighter than the console.
+    publicly. We surface that as an info note so the operator knows the
+    numbers are the org total, not their personal workspace view.
     """
     key = _settings.kilo_api_key
 
@@ -167,11 +167,22 @@ async def _check_kilo() -> AccountProviderUsage:
                 user = user_resp.json() or {}
                 spent_usd_raw = user.get("microdollars_used")
                 limit_usd_raw = user.get("kilo_pass_threshold")
+                acquired_raw = user.get("total_microdollars_acquired")
                 if spent_usd_raw is not None:
                     spent_usd = round(float(spent_usd_raw) / 1_000_000, 4)
                 if limit_usd_raw is not None:
                     limit_usd = round(float(limit_usd_raw) / 1_000_000, 4)
+                # `total_microdollars_acquired` is the lifetime acquisition
+                # total -- not displayed on the card today but kept here so
+                # the dashboard can surface it later without another probe.
+                _ = acquired_raw
 
+            # The user object returns ORG-level usage. The Kilo console's
+            # "Personal Workspace" view shows a *smaller* number for the
+            # same operator; that data is browser-session-only and not
+            # available via the API key. Surface this honestly so the
+            # operator knows why the dashboard numbers don't match their
+            # Personal Workspace tab.
             return AccountProviderUsage(
                 provider="kilo",
                 configured=True,
@@ -182,9 +193,20 @@ async def _check_kilo() -> AccountProviderUsage:
                 if (spent_usd is not None and limit_usd is not None)
                 else None,
                 model_count=model_count or None,
+                # Reuse the existing free-form error field as the
+                # honest annotation so the card stays within its current
+                # shape; the frontend will surface it as a small note.
                 error=(
-                    "personal-workspace breakdown only available in browser console"
-                    if spent_usd is None
+                    None
+                    if spent_usd is not None
+                    else "personal-workspace breakdown only available in browser console"
+                ),
+                # Reuse plan for the "org total" label so the card
+                # shows the user that this is the org-wide view, not
+                # their personal workspace tab.
+                plan=(
+                    "Org total"
+                    if spent_usd is not None
                     else None
                 ),
             )
@@ -376,9 +398,24 @@ async def _check_minimax() -> AccountProviderUsage:
 async def _check_deepseek() -> AccountProviderUsage:
     """DeepSeek user balance probe.
 
-    ``GET /user/balance`` returns a list of currency entries with
-    ``total_balance`` and ``topped_up_balance`` (string USD). No admin key is
-    required — the user key is enough.
+    ``GET /user/balance`` returns:
+
+    .. code-block:: json
+
+        {
+          "is_available": true,
+          "balance_infos": [
+            {"currency": "USD",
+             "total_balance": "2.75",
+             "granted_balance": "0.00",
+             "topped_up_balance": "2.75"}
+          ]
+        }
+
+    DeepSeek returns multiple currencies (USD + CNY); we prefer USD. Each
+    entry breaks the total into *granted* (free credits the vendor gave)
+    vs *topped-up* (cash the operator paid in). We surface both so the
+    card shows whether the remaining balance is bonus cash or real money.
     """
     key = _settings.deepseek_api_key
     if not key:
@@ -403,8 +440,9 @@ async def _check_deepseek() -> AccountProviderUsage:
                     error="API key invalid",
                 )
             resp.raise_for_status()
-            entries = (resp.json() or {}).get("balance_infos") or []
-            # DeepSeek returns multiple currencies (USD + CNY); prefer USD.
+            payload = resp.json() or {}
+            entries = payload.get("balance_infos") or []
+            # Prefer USD; fall back to the first entry if no USD present.
             usd = next(
                 (e for e in entries if str(e.get("currency", "")).upper() == "USD"),
                 entries[0] if entries else None,
@@ -413,6 +451,7 @@ async def _check_deepseek() -> AccountProviderUsage:
                 return AccountProviderUsage(
                     provider="deepseek",
                     configured=True,
+                    currency=str(payload.get("currency") or "USD"),
                     dashboard_url="https://platform.deepseek.com/usage",
                 )
             total = _num(usd.get("total_balance"))
@@ -424,8 +463,13 @@ async def _check_deepseek() -> AccountProviderUsage:
                 configured=True,
                 currency=str(usd.get("currency") or "USD"),
                 dashboard_url="https://platform.deepseek.com/usage",
-                spent_usd=round(spent, 4) if spent > 0 else 0.0,
+                # "Spent" is the live-cycle sum of granted + topped-up minus
+                # what's still on the account; clamp to >= 0 because vendors
+                # occasionally return tiny floating-point overshoot.
+                spent_usd=round(max(spent, 0.0), 4),
                 remaining_usd=round(total, 4) if total else None,
+                granted_usd=round(granted, 4) if granted else None,
+                topped_up_usd=round(topped_up, 4) if topped_up else None,
             )
         except Exception as exc:
             log.warning("deepseek_check_failed", error=str(exc))
