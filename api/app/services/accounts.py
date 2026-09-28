@@ -26,7 +26,6 @@ from app.schemas import (
     QuotaWindow,
 )
 from app.services.cache import cache
-from app.services.kilo import load_plans
 
 log = get_logger(__name__)
 _settings = get_settings()
@@ -104,33 +103,36 @@ async def _check_openrouter() -> AccountProviderUsage:
 
 
 async def _check_kilo() -> AccountProviderUsage:
-    key = _settings.kilo_api_key
-    tier = _settings.kilo_tier
+    """Kilo Pass usage probe.
 
-    # Resolve plan details from local YAML
-    plan_label: str | None = None
-    limit_usd: float | None = None
-    try:
-        plans = load_plans()
-        plan = next((p for p in plans if p.tier == tier), None)
-        if plan:
-            plan_label = f"{tier.capitalize()} ${plan.monthly_usd:.0f}/mo"
-            limit_usd = plan.paid_credits_usd
-    except Exception as exc:
-        log.warning("kilo_plan_load_failed", error=str(exc))
+    Two API surfaces are useful here:
+
+    1. The gateway ``/models`` endpoint on ``api.kilo.ai`` returns the
+       list of accessible models -- surface the count.
+    2. The Cloud user object on ``app.kilo.ai/api/user`` returns the
+       organization-level usage to date as microdollar counts
+       (``microdollars_used``, ``kilo_pass_threshold``). Microdollars are
+       1e-6 USD.
+
+    The dashboard's richer *Personal workspace* breakdown (this-month
+    usage / paid / available bonus / renews-in-N-days) is only fetched by
+    the Cloud console's client-side React fetch -- it requires a browser
+    session cookie, not the API key. Kilo does not expose that surface
+    publicly. We surface that as an info note so the operator knows why
+    the card looks lighter than the console.
+    """
+    key = _settings.kilo_api_key
 
     if not key:
         return AccountProviderUsage(
             provider="kilo",
             configured=False,
-            plan=plan_label,
-            limit_usd=limit_usd,
             dashboard_url="https://kilo.ai/dashboard",
         )
 
-    # Validate key and get model count — no balance endpoint in Kilo gateway API
     async with httpx.AsyncClient(timeout=10.0) as client:
         try:
+            # Gateway API: model count
             resp = await client.get(
                 f"{_settings.kilo_base_url}/models",
                 headers={"Authorization": f"Bearer {key}"},
@@ -139,29 +141,58 @@ async def _check_kilo() -> AccountProviderUsage:
                 return AccountProviderUsage(
                     provider="kilo",
                     configured=True,
-                    plan=plan_label,
-                    limit_usd=limit_usd,
-                    dashboard_url="https://kilo.ai/dashboard",
                     error="API key invalid",
                 )
             resp.raise_for_status()
             model_count = len(resp.json().get("data") or [])
+
+            # Cloud API: org-level usage to date. The 60s timeout here is
+            # generous; on normal hits this is <500ms.
+            try:
+                user_resp = await client.get(
+                    "https://app.kilo.ai/api/user",
+                    headers={
+                        "Authorization": f"Bearer {key}",
+                        "Accept": "application/json",
+                    },
+                    timeout=6.0,
+                )
+            except Exception as exc:
+                log.warning("kilo_user_fetch_failed", error=str(exc))
+                user_resp = None
+
+            spent_usd: float | None = None
+            limit_usd: float | None = None
+            if user_resp is not None and user_resp.status_code == 200:
+                user = user_resp.json() or {}
+                spent_usd_raw = user.get("microdollars_used")
+                limit_usd_raw = user.get("kilo_pass_threshold")
+                if spent_usd_raw is not None:
+                    spent_usd = round(float(spent_usd_raw) / 1_000_000, 4)
+                if limit_usd_raw is not None:
+                    limit_usd = round(float(limit_usd_raw) / 1_000_000, 4)
+
             return AccountProviderUsage(
                 provider="kilo",
                 configured=True,
-                plan=plan_label,
+                currency="USD",
+                spent_usd=spent_usd,
                 limit_usd=limit_usd,
+                remaining_usd=round(limit_usd - spent_usd, 4)
+                if (spent_usd is not None and limit_usd is not None)
+                else None,
                 model_count=model_count or None,
-                dashboard_url="https://kilo.ai/dashboard",
+                error=(
+                    "personal-workspace breakdown only available in browser console"
+                    if spent_usd is None
+                    else None
+                ),
             )
         except Exception as exc:
             log.warning("kilo_check_failed", error=str(exc))
             return AccountProviderUsage(
                 provider="kilo",
                 configured=True,
-                plan=plan_label,
-                limit_usd=limit_usd,
-                dashboard_url="https://kilo.ai/dashboard",
                 error=str(exc)[:80],
             )
 

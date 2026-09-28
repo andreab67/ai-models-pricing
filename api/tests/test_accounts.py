@@ -289,6 +289,80 @@ async def test_openai_unconfigured(monkeypatch):
     assert out.configured is False
 
 
+# ---------------------------------------------------------------------------
+# Kilo
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_kilo_unconfigured(monkeypatch):
+    _patch_settings(monkeypatch, kilo_api_key="")
+    out = await accounts._check_kilo()
+    assert out.configured is False
+
+
+@pytest.mark.asyncio
+async def test_kilo_models_and_user_parsed(monkeypatch):
+    """Live shape: gateway /models + cloud /api/user (org-level microdollar
+    counts). 325_265_679 microdollars == $325.27 spent of $341.62 threshold.
+    """
+    _patch_settings(monkeypatch, kilo_api_key="sk-kilo")
+    with respx.mock(assert_all_called=False) as mock:
+        # kilo_base_url is https://api.kilo.ai/api/gateway in the default config
+        mock.get("https://api.kilo.ai/api/gateway/models").respond(
+            200, json={"data": [{"id": "m1"}, {"id": "m2"}]}
+        )
+        mock.get("https://app.kilo.ai/api/user").respond(
+            200,
+            json={
+                "microdollars_used": 325265679,
+                "kilo_pass_threshold": 341619360,
+                "total_microdollars_acquired": 349050000,
+            },
+        )
+        out = await accounts._check_kilo()
+    assert out.configured is True
+    assert out.model_count == 2
+    assert out.spent_usd == pytest.approx(325.2657, abs=1e-3)
+    assert out.limit_usd == pytest.approx(341.6194, abs=1e-3)
+    assert out.remaining_usd == pytest.approx(16.3537, abs=1e-3)
+    # No plan badge -- the user wants numbers, not plan info.
+    assert out.plan is None
+
+
+@pytest.mark.asyncio
+async def test_kilo_user_endpoint_unreachable_surfaces_note(monkeypatch):
+    """If the cloud user endpoint is unreachable (network error or 4xx)
+    we still show model count and surface the vendor limitation in the
+    error string so the operator knows why the personal-workspace numbers
+    are missing.
+    """
+    _patch_settings(monkeypatch, kilo_api_key="sk-kilo")
+    with respx.mock(assert_all_called=False) as mock:
+        mock.get("https://api.kilo.ai/api/gateway/models").respond(
+            200, json={"data": [{"id": "m"}]}
+        )
+        mock.get("https://app.kilo.ai/api/user").respond(503)
+        out = await accounts._check_kilo()
+    assert out.configured is True
+    assert out.model_count == 1
+    # No spent/limit surfaced when the cloud endpoint fails.
+    assert out.spent_usd is None
+    assert out.limit_usd is None
+    # Honest note that the personal breakdown isn't reachable server-side.
+    assert "browser console" in (out.error or "")
+
+
+@pytest.mark.asyncio
+async def test_kilo_invalid_key(monkeypatch):
+    _patch_settings(monkeypatch, kilo_api_key="sk-bad")
+    with respx.mock(assert_all_called=False) as mock:
+        mock.get("https://api.kilo.ai/api/gateway/models").respond(401)
+        out = await accounts._check_kilo()
+    assert out.configured is True
+    assert out.error == "API key invalid"
+
+
 @pytest.mark.asyncio
 async def test_openai_credit_grants_parsed(monkeypatch):
     """When the operator has a real admin key, the credit-grants endpoint
@@ -503,6 +577,25 @@ async def test_get_usage_returns_every_provider(monkeypatch):
         )
         mock.get(url__regex=r"https://api\.kilo\.ai.*/models").respond(
             200, json={"data": [{"id": "m"}]}
+        )
+        # Kilo Cloud user endpoint -- microdollar counts.
+        mock.get("https://app.kilo.ai/api/user").respond(
+            200,
+            json={
+                "microdollars_used": 325265679,
+                "kilo_pass_threshold": 341619360,
+            },
+        )
+        # Cloud user endpoint -- used by _check_kilo to surface org-level
+        # usage (microdollars_used, kilo_pass_threshold). 3_252_656_79
+        # microdollars == $325.27, the example figure from a real org.
+        mock.get("https://app.kilo.ai/api/user").respond(
+            200,
+            json={
+                "microdollars_used": 325265679,
+                "kilo_pass_threshold": 341619360,
+                "total_microdollars_acquired": 349050000,
+            },
         )
         mock.get(url__regex=r"https://api\.minimax\.(chat|io).*coding_plan.*").respond(
             200,
