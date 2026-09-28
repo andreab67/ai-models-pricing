@@ -154,6 +154,10 @@ function ProviderCard({
                 : w.remaining_percent < 50
                   ? "text-yellow-400"
                   : "text-emerald-400";
+            // limit=0 means the quota is "unlimited" -- the vendor returns
+            // usage=0 too. Show the percent but skip the "/limit" suffix
+            // so we don't render a misleading "0/0".
+            const showLimit = w.limit > 0;
             return (
               <div
                 key={`${w.name}-${w.period}-${i}`}
@@ -166,9 +170,14 @@ function ProviderCard({
                   <span className={`font-semibold ${pctColor}`}>
                     {w.remaining_percent.toFixed(1)}%
                   </span>
-                  <span className="text-muted/70 ml-2">
-                    {w.usage}/{w.limit}
-                  </span>
+                  {showLimit && (
+                    <span className="text-muted/70 ml-2">
+                      {w.usage}/{w.limit}
+                    </span>
+                  )}
+                  {!showLimit && (
+                    <span className="text-muted/60 ml-2">unlimited</span>
+                  )}
                 </span>
               </div>
             );

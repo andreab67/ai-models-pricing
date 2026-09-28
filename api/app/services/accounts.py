@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import math
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import httpx
@@ -274,11 +274,16 @@ async def _check_minimax() -> AccountProviderUsage:
                             float(weekly_pct_raw) if weekly_pct_raw is not None else None
                         )
 
-                        # Only emit a window when both the limit AND the
-                        # remaining percent are present -- a window with
-                        # usage but no limit would be a misleading "1 / ?"
-                        # on the dashboard.
-                        if interval_limit > 0 and interval_pct is not None:
+                        # Only require the remaining percent to emit a
+                        # window. The limit can legitimately be 0 for an
+                        # "unlimited" allowance (e.g. the operator's
+                        # general plan returns total_count=0 with a real
+                        # remaining percent); dropping those hides the
+                        # healthy quota from the dashboard. A usage > 0
+                        # with limit = 0 would be a vendor bug -- we
+                        # surface those with limit=0 and let the UI
+                        # render the row without a "/limit" suffix.
+                        if interval_pct is not None:
                             windows.append(
                                 QuotaWindow(
                                     name=name,
@@ -290,7 +295,7 @@ async def _check_minimax() -> AccountProviderUsage:
                             )
                             if worst_pct is None or interval_pct < worst_pct:
                                 worst_pct = interval_pct
-                        if weekly_limit > 0 and weekly_pct is not None:
+                        if weekly_pct is not None:
                             windows.append(
                                 QuotaWindow(
                                     name=name,
@@ -343,10 +348,13 @@ async def _check_minimax() -> AccountProviderUsage:
 async def _check_anthropic() -> AccountProviderUsage:
     """Anthropic balance probe.
 
-    Anthropic exposes ``/v1/organizations/{org_id}/billing/balance`` but the
-    org_id is tenant-scoped; with the admin key we first look up the org id
-    via ``/v1/organizations`` and then query the balance. Falls back to a
-    plain key-validity probe when no admin key is configured.
+    The admin API's billing/usage endpoints (e.g.
+    ``/v1/organizations/{id}/billing/balance``, ``/v1/usage``) require an
+    admin key created with the ``billing:read`` and/or ``usage:read`` scope
+    at <https://console.anthropic.com/settings/admin-keys>. A scope-limited
+    admin key will pass ``/v1/organizations/me`` (org lookup) but 404 on
+    every billing endpoint -- so we report the actual vendor status instead
+    of guessing.
     """
     admin_key = _settings.anthropic_admin_key
     user_key = _settings.anthropic_api_key
@@ -365,34 +373,24 @@ async def _check_anthropic() -> AccountProviderUsage:
 
     async with httpx.AsyncClient(timeout=10.0) as client:
         try:
-            orgs_resp = await client.get(
-                "https://api.anthropic.com/v1/organizations",
+            # Use ``/v1/organizations/me`` rather than the list endpoint --
+            # the list endpoint requires an unscoped admin key, while
+            # ``/me`` works for any admin key AND any org-scoped user key,
+            # so we get the org id without an extra 404 round-trip.
+            me_resp = await client.get(
+                "https://api.anthropic.com/v1/organizations/me",
                 headers=headers,
             )
-            if orgs_resp.status_code == 401:
+            if me_resp.status_code == 401:
                 return AccountProviderUsage(
                     provider="anthropic",
                     configured=True,
                     dashboard_url="https://console.anthropic.com/settings/billing",
                     error="API key invalid",
                 )
-            if orgs_resp.status_code == 403:
-                return AccountProviderUsage(
-                    provider="anthropic",
-                    configured=True,
-                    dashboard_url="https://console.anthropic.com/settings/billing",
-                    error="admin key required for billing",
-                )
-            orgs_resp.raise_for_status()
-            orgs = (orgs_resp.json() or {}).get("data") or []
-            if not orgs:
-                return AccountProviderUsage(
-                    provider="anthropic",
-                    configured=True,
-                    dashboard_url="https://console.anthropic.com/settings/billing",
-                    error="no organization for this key",
-                )
-            org_id = orgs[0].get("id")
+            me_resp.raise_for_status()
+            me = me_resp.json() or {}
+            org_id = me.get("id")
             if not isinstance(org_id, str):
                 return AccountProviderUsage(
                     provider="anthropic",
@@ -400,16 +398,26 @@ async def _check_anthropic() -> AccountProviderUsage:
                     dashboard_url="https://console.anthropic.com/settings/billing",
                     error="organization id missing",
                 )
+            # ``anthropic-organization-id`` header is the recommended way to
+            # scope the request; the URL-path ``/organizations/{id}/...`` form
+            # 404s for some admin scopes.
+            bal_headers = {**headers, "anthropic-organization-id": org_id}
             bal_resp = await client.get(
-                f"https://api.anthropic.com/v1/organizations/{org_id}/billing/balance",
-                headers=headers,
+                "https://api.anthropic.com/v1/billing/balance",
+                headers=bal_headers,
             )
+            if bal_resp.status_code == 404:
+                # Common cause: admin key has org-read scope but not
+                # billing:read. Surface the action verb in the error so the
+                # operator knows what to fix in the console.
+                return AccountProviderUsage(
+                    provider="anthropic",
+                    configured=True,
+                    dashboard_url="https://console.anthropic.com/settings/admin-keys",
+                    error="admin key lacks billing:read scope",
+                )
             bal_resp.raise_for_status()
             bal = bal_resp.json() or {}
-            # ``available_credit`` is returned in DOLLARS (e.g. 50.0 means
-            # $50 remaining). Older docs sometimes showed cents; the live admin
-            # endpoint has used dollars since 2025. If Anthropic ever rotates
-            # this back, multiply through here rather than at the UI layer.
             remaining_usd = _num(bal.get("available_credit") or bal.get("balance"))
             used_usd = _num(bal.get("used_credit") or bal.get("used"))
             currency = str(bal.get("currency") or "USD")
@@ -426,18 +434,21 @@ async def _check_anthropic() -> AccountProviderUsage:
             return AccountProviderUsage(
                 provider="anthropic",
                 configured=True,
-                dashboard_url="https://console.anthropic.com/settings/billing",
+                dashboard_url="https://console.anthropic.com/settings/admin-keys",
                 error=str(exc)[:80],
             )
 
 
 async def _check_openai() -> AccountProviderUsage:
-    """OpenAI billing probe.
+    """OpenAI usage probe.
 
-    ``/v1/dashboard/billing/credit_grants`` returns the active grant window
-    (total_granted, total_used, total_available, period_start/end). Requires
-    an admin key (``sk-admin-...``); with a regular key the endpoint returns
-    403 and we surface that as ``error`` so the user knows to rotate.
+    OpenAI deliberately blocks the ``/v1/dashboard/billing/credit_grants``
+    endpoint from server-side keys (returns ``403 must be made with a
+    session key`` for any ``sk-...`` or ``sk-proj-...`` token). The
+    ``/v1/usage`` endpoint works server-side but returns request counts
+    (not USD) for a date range, so it is not directly comparable to the
+    credit-grant window. We surface it as a count-based view, falling
+    back to the dashboard link for the actual $ balance.
     """
     admin_key = _settings.openai_admin_key
     user_key = _settings.openai_api_key
@@ -452,6 +463,9 @@ async def _check_openai() -> AccountProviderUsage:
     headers = {"Authorization": f"Bearer {key}"}
     async with httpx.AsyncClient(timeout=10.0) as client:
         try:
+            # First try the legacy billing endpoint -- if the operator has
+            # provisioned a true admin key, this works and gives us the
+            # $ credit-grant window directly.
             resp = await client.get(
                 "https://api.openai.com/v1/dashboard/billing/credit_grants",
                 headers=headers,
@@ -463,28 +477,68 @@ async def _check_openai() -> AccountProviderUsage:
                     dashboard_url="https://platform.openai.com/account/billing/overview",
                     error="API key invalid",
                 )
-            if resp.status_code == 403:
+            if resp.status_code == 200:
+                grants = resp.json() or {}
+                total_granted = _num(grants.get("total_granted"))
+                total_used = _num(grants.get("total_used"))
+                total_available = _num(grants.get("total_available"))
                 return AccountProviderUsage(
                     provider="openai",
-                    configured=user_key and not admin_key,
+                    configured=True,
+                    currency="USD",
                     dashboard_url="https://platform.openai.com/account/billing/overview",
-                    error="admin key required for billing",
+                    spent_usd=round(total_used, 4) if total_used else None,
+                    limit_usd=round(total_granted, 4) if total_granted else None,
+                    remaining_usd=round(total_available, 4) if total_available else None,
+                    period_start=str(grants.get("period_start") or "") or None,
+                    period_end=str(grants.get("period_end") or "") or None,
                 )
-            resp.raise_for_status()
-            grants = resp.json() or {}
-            total_granted = _num(grants.get("total_granted"))
-            total_used = _num(grants.get("total_used"))
-            total_available = _num(grants.get("total_available"))
+            # 403 / 404 / any non-200: billing is gated to browser session keys.
+            # Fall back to /v1/usage which works server-side and gives a
+            # count-based view for the trailing 7 days.
+            end = datetime.now(UTC).date()
+            start = end - timedelta(days=7)
+            usage_resp = await client.get(
+                "https://api.openai.com/v1/usage",
+                headers=headers,
+                params={"date": f"{start}..{end}"},
+            )
+            if usage_resp.status_code == 401:
+                return AccountProviderUsage(
+                    provider="openai",
+                    configured=True,
+                    dashboard_url="https://platform.openai.com/account/billing/overview",
+                    error="API key invalid",
+                )
+            if usage_resp.status_code != 200:
+                return AccountProviderUsage(
+                    provider="openai",
+                    configured=True,
+                    dashboard_url="https://platform.openai.com/account/billing/overview",
+                    error="billing gated to browser session keys",
+                )
+            usage = usage_resp.json() or {}
+            # /v1/usage returns the rows directly under "data"; if a date
+            # range was specified it can also be wrapped. Sum request counts
+            # across every model row in the window.
+            rows = usage.get("data") if isinstance(usage.get("data"), list) else []
+            total_requests = 0
+            for r in rows:
+                if not isinstance(r, dict):
+                    continue
+                total_requests += _to_int(r.get("n_requests"))
             return AccountProviderUsage(
                 provider="openai",
                 configured=True,
-                currency="USD",
+                currency="REQS",
                 dashboard_url="https://platform.openai.com/account/billing/overview",
-                spent_usd=round(total_used, 4) if total_used else None,
-                limit_usd=round(total_granted, 4) if total_granted else None,
-                remaining_usd=round(total_available, 4) if total_available else None,
-                period_start=str(grants.get("period_start") or "") or None,
-                period_end=str(grants.get("period_end") or "") or None,
+                usage_count=total_requests or None,
+                usage_limit=None,
+                # Last-7-days window -- not comparable to a credit-grant
+                # window, so we surface the dollar balance via the dashboard
+                # link rather than fabricating one.
+                plan="7d usage",
+                error="billing endpoint requires browser session; showing 7d usage counts instead",
             )
         except Exception as exc:
             log.warning("openai_check_failed", error=str(exc))
@@ -565,10 +619,15 @@ async def _check_alibaba() -> AccountProviderUsage:
 
     DashScope does not expose a public per-user balance REST endpoint that
     is reliably documented; we validate the key against the free
-    ``GET /api/v1/models`` metadata endpoint (200 on valid key, 401/403 on
-    bad key) and surface a deep link to the console billing page for actual
+    ``GET /api/v1/models`` metadata endpoint (200 on valid key, 401 on bad
+    key) and surface a deep link to the console billing page for actual
     spend numbers. We deliberately do NOT call the billable text-generation
     endpoint here -- that would charge real tokens and pollute usage history.
+
+    International site (``bailian.console.aliyun.com`` auto-redirects users
+    outside China) uses the ``dashscope-intl.aliyuncs.com`` host; mainland
+    accounts use ``dashscope.aliyuncs.com``. We try both and report which
+    one accepted the key.
     """
     key = _settings.alibaba_api_key
     if not key:
@@ -579,34 +638,48 @@ async def _check_alibaba() -> AccountProviderUsage:
         )
 
     headers = {"Authorization": f"Bearer {key}"}
+    # International host first -- DashScope's console auto-redirects users
+    # outside China there, and the user's international API keys are bound
+    # to this host.
+    endpoints = (
+        ("https://dashscope-intl.aliyuncs.com/api/v1/models",
+         "https://bailian.console.aliyun.com/"),
+        ("https://dashscope.aliyuncs.com/api/v1/models",
+         "https://bailian.console.aliyun.com/"),
+    )
     async with httpx.AsyncClient(timeout=10.0) as client:
-        try:
-            resp = await client.get(
-                "https://dashscope.aliyuncs.com/api/v1/models",
-                headers=headers,
-            )
-            if resp.status_code in (401, 403):
-                return AccountProviderUsage(
-                    provider="alibaba",
-                    configured=True,
-                    dashboard_url="https://bailian.console.aliyun.com/",
-                    error="API key invalid",
-                )
-            resp.raise_for_status()
-            return AccountProviderUsage(
-                provider="alibaba",
-                configured=True,
-                currency="CNY",
-                dashboard_url="https://bailian.console.aliyun.com/",
-            )
-        except Exception as exc:
-            log.warning("alibaba_check_failed", error=str(exc))
-            return AccountProviderUsage(
-                provider="alibaba",
-                configured=True,
-                dashboard_url="https://bailian.console.aliyun.com/",
-                error=str(exc)[:80],
-            )
+        last_error: str | None = None
+        for url, dashboard in endpoints:
+            try:
+                resp = await client.get(url, headers=headers)
+                if resp.status_code == 200:
+                    return AccountProviderUsage(
+                        provider="alibaba",
+                        configured=True,
+                        currency="CNY",
+                        dashboard_url=dashboard,
+                    )
+                if resp.status_code in (401, 403):
+                    # Capture the vendor's exact reason so the operator can
+                    # tell at a glance whether it's a bad key vs. an
+                    # account-region mismatch.
+                    try:
+                        body = resp.json()
+                        last_error = body.get("message") or resp.text[:120]
+                    except Exception:
+                        last_error = resp.text[:120]
+                    continue
+                last_error = f"HTTP {resp.status_code}: {resp.text[:120]}"
+            except Exception as exc:
+                log.warning("alibaba_check_failed", url=url, error=str(exc))
+                last_error = str(exc)[:120]
+                continue
+        return AccountProviderUsage(
+            provider="alibaba",
+            configured=True,
+            dashboard_url="https://bailian.console.aliyun.com/",
+            error=last_error or "no DashScope host accepted the key",
+        )
 
 
 _ACTIVITY_CACHE_KEY = "accounts:activity"
