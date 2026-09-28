@@ -19,6 +19,10 @@ interface ProviderMeta {
   label: string;
   accent: string;
   description: string;
+  // Overrides the "Limit" row label. Kilo's denominator is lifetime credits
+  // acquired, not a spending cap, so calling it "Limit" would reintroduce
+  // the same misreading that produced the bogus balance earlier.
+  limitLabel?: string;
 }
 
 const META: Record<ProviderId, ProviderMeta> = {
@@ -30,7 +34,8 @@ const META: Record<ProviderId, ProviderMeta> = {
   kilo: {
     label: "Kilo",
     accent: "text-cyan-400",
-    description: "Kilo Code gateway plan + model access",
+    description: "Kilo Code lifetime credit + model access",
+    limitLabel: "Acquired",
   },
   openrouter: {
     label: "OpenRouter",
@@ -94,6 +99,15 @@ function ProviderCard({
           </span>
         )}
       </div>
+
+      {/* `warning` is an alarm state that does NOT invalidate the figures
+          below (e.g. DeepSeek balance too low to cover a call). It renders
+          above the data so the operator still sees the balance and its
+          paid/free split -- exactly when they need it most. `error` is the
+          hard failure path and does replace the body. */}
+      {account.warning && !account.error && (
+        <p className="text-xs text-yellow-400">{account.warning}</p>
+      )}
 
       {!account.configured ? (
         <p className="text-xs text-muted">
@@ -187,19 +201,28 @@ function ProviderCard({
       ) : (
         <>
           <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
-            <span className="text-muted">
-              {account.period_start
-                ? `Since ${account.period_start.slice(0, 10)}`
-                : "Used"}
-            </span>
-            <span className="text-right font-mono">
-              {account.spent_usd != null ? fmtUsd(account.spent_usd) : "—"}
-            </span>
+            {/* Only render a spend row when the vendor actually exposes a
+                spend figure. DeepSeek's /user/balance is a snapshot (total
+                already includes granted + topped-up), so no spend can be
+                derived -- an unconditional row would render a permanent "—". */}
+            {account.spent_usd != null && (
+              <>
+                <span className="text-muted">
+                  {account.period_start
+                    ? `Since ${account.period_start.slice(0, 10)}`
+                    : "Used"}
+                </span>
+                <span className="text-right font-mono">
+                  {fmtUsd(account.spent_usd)}
+                </span>
+              </>
+            )}
 
             {account.limit_usd != null && (
               <>
                 <span className="text-muted">
-                  Limit{account.currency ? ` (${account.currency})` : ""}
+                  {meta.limitLabel ?? "Limit"}
+                  {account.currency ? ` (${account.currency})` : ""}
                 </span>
                 <span className="text-right font-mono">
                   {fmtUsd(account.limit_usd)}
@@ -238,12 +261,12 @@ function ProviderCard({
                 </span>
               </>
             )}
-
-            {children}
           </div>
         </>
       )}
 
+      {/* Extra content (e.g. the OpenRouter per-model table) renders once,
+          full-width, below the status grid -- not as a grid cell. */}
       {children}
     </div>
   );

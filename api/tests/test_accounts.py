@@ -88,8 +88,15 @@ async def test_kilo_unconfigured(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_kilo_models_and_user_parsed(monkeypatch):
-    """Live shape: gateway /models + cloud /api/user (org-level microdollar
-    counts). 325_265_679 microdollars == $325.27 spent of $341.62 threshold.
+    """Live shape: gateway /models + cloud /api/user (microdollar counts).
+
+    Remaining credit is ``total_microdollars_acquired - microdollars_used``
+    = 349.05 - 325.27 = $23.78, which is exactly what the Kilo console shows
+    as "Remaining Personal Credits".
+
+    ``kilo_pass_threshold`` is deliberately NOT used: it is the Kilo Pass
+    spend threshold, not a budget, so using it as a limit produced a
+    fabricated $16.35 remaining.
     """
     _patch_settings(monkeypatch, kilo_api_key="sk-kilo")
     with respx.mock(assert_all_called=False) as mock:
@@ -109,20 +116,44 @@ async def test_kilo_models_and_user_parsed(monkeypatch):
     assert out.configured is True
     assert out.model_count == 2
     assert out.spent_usd == pytest.approx(325.2657, abs=1e-3)
-    assert out.limit_usd == pytest.approx(341.6194, abs=1e-3)
-    assert out.remaining_usd == pytest.approx(16.3537, abs=1e-3)
-    # The plan field is repurposed as the org-vs-personal scope label --
-    # the user object returns ORG-level numbers, so we surface "Org total"
-    # rather than leaving the badge blank.
-    assert out.plan == "Org total"
+    # The limit is the LIFETIME credits acquired, not the pass threshold.
+    assert out.limit_usd == pytest.approx(349.05, abs=1e-3)
+    # 349.05 - 325.27 = 23.78, matching the console's Remaining Personal Credits.
+    # NOTE: this also pins that the pass threshold (341.62) is NOT the limit --
+    # a revert to that field would fail this ~$7.27 away.
+    assert out.remaining_usd == pytest.approx(23.7843, abs=1e-3)
+    assert out.plan == "Lifetime credit"
+    assert out.error is None
 
 
 @pytest.mark.asyncio
-async def test_kilo_user_endpoint_unreachable_surfaces_note(monkeypatch):
+async def test_kilo_pass_threshold_is_not_a_limit(monkeypatch):
+    """A user object that carries only the pass threshold must not produce a
+    limit/remaining pair -- there is no real denominator to compute against,
+    so the card reports spend alone rather than a fabricated balance.
+    """
+    _patch_settings(monkeypatch, kilo_api_key="sk-kilo")
+    with respx.mock(assert_all_called=False) as mock:
+        mock.get("https://api.kilo.ai/api/gateway/models").respond(
+            200, json={"data": [{"id": "m"}]}
+        )
+        mock.get("https://app.kilo.ai/api/user").respond(
+            200,
+            json={
+                "microdollars_used": 325265679,
+                "kilo_pass_threshold": 341619360,
+            },
+        )
+        out = await accounts._check_kilo()
+    assert out.spent_usd == pytest.approx(325.2657, abs=1e-3)
+    assert out.limit_usd is None
+    assert out.remaining_usd is None
+
+
+@pytest.mark.asyncio
+async def test_kilo_user_endpoint_unreachable_omits_balance(monkeypatch):
     """If the cloud user endpoint is unreachable (network error or 4xx)
-    we still show model count and surface the vendor limitation in the
-    error string so the operator knows why the personal-workspace numbers
-    are missing.
+    we still show model count, and we do NOT invent a balance.
     """
     _patch_settings(monkeypatch, kilo_api_key="sk-kilo")
     with respx.mock(assert_all_called=False) as mock:
@@ -136,8 +167,7 @@ async def test_kilo_user_endpoint_unreachable_surfaces_note(monkeypatch):
     # No spent/limit surfaced when the cloud endpoint fails.
     assert out.spent_usd is None
     assert out.limit_usd is None
-    # Honest note that the personal breakdown isn't reachable server-side.
-    assert "browser console" in (out.error or "")
+    assert out.remaining_usd is None
 
 
 @pytest.mark.asyncio
@@ -296,6 +326,10 @@ async def test_deepseek_unconfigured(monkeypatch):
 async def test_deepseek_balance_parsed(monkeypatch):
     """DeepSeek's /user/balance returns granted + topped_up separately so the
     dashboard can show the paid / free breakdown.
+
+    Per the API reference, ``total_balance`` already INCLUDES granted and
+    topped-up, so no spend figure can be derived from this endpoint and the
+    card reports none.
     """
     _patch_settings(monkeypatch, deepseek_api_key="sk-deepseek")
     with respx.mock(base_url="https://api.deepseek.com") as mock:
@@ -306,7 +340,7 @@ async def test_deepseek_balance_parsed(monkeypatch):
                 "balance_infos": [
                     {
                         "currency": "USD",
-                        "total_balance": "12.34",
+                        "total_balance": "15.00",
                         "granted_balance": "10.00",
                         "topped_up_balance": "5.00",
                     }
@@ -315,47 +349,131 @@ async def test_deepseek_balance_parsed(monkeypatch):
         )
         out = await accounts._check_deepseek()
     assert out.configured is True
-    assert out.remaining_usd == pytest.approx(12.34)
-    # granted + topped_up - total = 15.00 - 12.34 = 2.66
-    assert out.spent_usd == pytest.approx(2.66)
+    assert out.remaining_usd == pytest.approx(15.00)
+    # A snapshot balance is not a ledger: we refuse to invent a spend number.
+    assert out.spent_usd is None
     assert out.currency == "USD"
     # Credit composition breakdown.
     assert out.granted_usd == pytest.approx(10.00)
     assert out.topped_up_usd == pytest.approx(5.00)
+    assert out.error is None
 
 
 @pytest.mark.asyncio
-async def test_deepseek_spent_clamped_to_zero(monkeypatch):
-    """If the vendor returns a tiny floating-point overshoot (e.g.
-    granted + topped_up - total = -0.001), we clamp spent to 0 so the
-    card doesn't render a negative value.
+async def test_deepseek_unavailable_balance_surfaces_warning(monkeypatch):
+    """`is_available: false` means the balance cannot cover an API call.
+
+    It must land in `warning`, NOT `error`: `error` makes the card render
+    only the message and hides the remaining balance and its paid/free
+    split -- precisely the figures the operator needs in the alarm state.
     """
     _patch_settings(monkeypatch, deepseek_api_key="sk-deepseek")
     with respx.mock(base_url="https://api.deepseek.com") as mock:
         mock.get("/user/balance").respond(
             200,
             json={
+                "is_available": False,
                 "balance_infos": [
                     {
                         "currency": "USD",
-                        "total_balance": "5.00",
-                        "granted_balance": "0.00",
-                        "topped_up_balance": "5.00",
+                        "total_balance": "0.10",
+                        "granted_balance": "0.10",
+                        "topped_up_balance": "0.00",
                     }
-                ]
+                ],
             },
         )
         out = await accounts._check_deepseek()
-    assert out.spent_usd == 0.0
-    assert out.remaining_usd == pytest.approx(5.00)
+    assert out.configured is True
+    # Data survives the warning -- this is the whole point.
+    assert out.remaining_usd == pytest.approx(0.10)
+    assert out.granted_usd == pytest.approx(0.10)
+    assert out.warning == "balance too low for API calls"
+    # A warning must never masquerade as a hard probe failure.
+    assert out.error is None
 
 
 @pytest.mark.asyncio
-async def test_kilo_org_total_relabeled(monkeypatch):
-    """When /api/user returns org-level numbers we label the plan badge as
-    'Org total' so the operator knows these are the *organization-wide*
-    figures, not their Personal Workspace view (which is browser-session-
-    only and unreachable via the API).
+async def test_deepseek_null_is_available_is_not_a_false_alarm(monkeypatch):
+    """`is_available` explicitly null means UNKNOWN, not "balance too low".
+
+    Truthiness on a present-but-null field would fire a false alarm, so the
+    check is `is not False` rather than `bool(...)`.
+    """
+    _patch_settings(monkeypatch, deepseek_api_key="sk-deepseek")
+    with respx.mock(base_url="https://api.deepseek.com") as mock:
+        mock.get("/user/balance").respond(
+            200,
+            json={
+                "is_available": None,
+                "balance_infos": [
+                    {
+                        "currency": "USD",
+                        "total_balance": "2.75",
+                        "granted_balance": "0.00",
+                        "topped_up_balance": "2.75",
+                    }
+                ],
+            },
+        )
+        out = await accounts._check_deepseek()
+    assert out.warning is None
+    assert out.remaining_usd == pytest.approx(2.75)
+
+
+@pytest.mark.asyncio
+async def test_deepseek_prefers_usd_over_cny(monkeypatch):
+    """DeepSeek returns a CNY and a USD entry; USD must win, otherwise the
+    card would quote a CNY figure under a USD label.
+    """
+    _patch_settings(monkeypatch, deepseek_api_key="sk-deepseek")
+    with respx.mock(base_url="https://api.deepseek.com") as mock:
+        mock.get("/user/balance").respond(
+            200,
+            json={
+                "is_available": True,
+                "balance_infos": [
+                    {
+                        "currency": "CNY",
+                        "total_balance": "110.00",
+                        "granted_balance": "10.00",
+                        "topped_up_balance": "100.00",
+                    },
+                    {
+                        "currency": "USD",
+                        "total_balance": "2.75",
+                        "granted_balance": "0.00",
+                        "topped_up_balance": "2.75",
+                    },
+                ],
+            },
+        )
+        out = await accounts._check_deepseek()
+    assert out.currency == "USD"
+    assert out.remaining_usd == pytest.approx(2.75)
+
+
+@pytest.mark.asyncio
+async def test_deepseek_no_balance_infos(monkeypatch):
+    """A 200 with an empty balance_infos array is not a crash: the key is
+    valid, we just have no number to show.
+    """
+    _patch_settings(monkeypatch, deepseek_api_key="sk-deepseek")
+    with respx.mock(base_url="https://api.deepseek.com") as mock:
+        mock.get("/user/balance").respond(
+            200, json={"is_available": True, "balance_infos": []}
+        )
+        out = await accounts._check_deepseek()
+    assert out.configured is True
+    assert out.remaining_usd is None
+    assert out.spent_usd is None
+    assert out.error is None
+
+
+@pytest.mark.asyncio
+async def test_kilo_acquired_without_used(monkeypatch):
+    """Credits acquired but nothing spent yet: limit surfaces, remaining
+    equals the full acquired amount.
     """
     _patch_settings(monkeypatch, kilo_api_key="sk-kilo")
     with respx.mock(assert_all_called=False) as mock:
@@ -365,20 +483,16 @@ async def test_kilo_org_total_relabeled(monkeypatch):
         mock.get("https://app.kilo.ai/api/user").respond(
             200,
             json={
-                "microdollars_used": 325265679,
-                "kilo_pass_threshold": 341619360,
-                "total_microdollars_acquired": 349050000,
+                "microdollars_used": 0,
+                "total_microdollars_acquired": 20000000,
             },
         )
         out = await accounts._check_kilo()
-    assert out.configured is True
-    assert out.spent_usd == pytest.approx(325.2657, abs=1e-3)
-    assert out.limit_usd == pytest.approx(341.6194, abs=1e-3)
-    # Plan badge becomes the org-total label.
-    assert out.plan == "Org total"
-    # The honest "personal workspace not reachable" note is gone because
-    # we DID get numbers -- just org-level.
-    assert out.error is None
+    assert out.limit_usd == pytest.approx(20.0, abs=1e-3)
+    assert out.remaining_usd == pytest.approx(20.0, abs=1e-3)
+    # The label must survive the zero-spend path too -- it is what tells the
+    # operator these are lifetime figures rather than this month's budget.
+    assert out.plan == "Lifetime credit"
 
 
 # ---------------------------------------------------------------------------

@@ -169,6 +169,13 @@ class AccountProviderUsage(BaseModel):
     # whether the remaining balance is topped-up cash or free credits.
     granted_usd: float | None = None
     topped_up_usd: float | None = None
+    # Human-readable problem the operator should act on, but which does NOT
+    # invalidate the rest of the record. Distinct from `error`, which means
+    # "this probe failed, the numbers below are unusable". A warning renders
+    # alongside the data so an alarm state never hides the very figures the
+    # operator needs in order to act on it (e.g. DeepSeek is_available=false
+    # must still show the remaining balance and its paid/free split).
+    warning: str | None = None
     error: str | None = None
 
 

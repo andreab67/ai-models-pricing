@@ -137,6 +137,10 @@ export interface AccountProviderUsage {
   // balance is topped-up cash or free credits.
   granted_usd: number | null;
   topped_up_usd: number | null;
+  // An actionable problem that does NOT invalidate the rest of the record.
+  // Rendered above the figures; `error` is the hard-failure path that
+  // replaces the body entirely.
+  warning: string | null;
   error: string | null;
 }
 

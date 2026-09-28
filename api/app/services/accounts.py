@@ -109,17 +109,27 @@ async def _check_kilo() -> AccountProviderUsage:
 
     1. The gateway ``/models`` endpoint on ``api.kilo.ai`` returns the
        list of accessible models -- surface the count.
-    2. The Cloud user object on ``app.kilo.ai/api/user`` returns the
-       organization-level usage to date as microdollar counts
-       (``microdollars_used``, ``kilo_pass_threshold``). Microdollars are
-       1e-6 USD.
+    2. The Cloud user object on ``app.kilo.ai/api/user`` returns lifetime
+       microdollar counts (``microdollars_used``,
+       ``total_microdollars_acquired``). Microdollars are 1e-6 USD.
 
-    The dashboard's richer *Personal workspace* breakdown (this-month
+    Remaining credit is ``total_microdollars_acquired - microdollars_used``.
+    That is the same figure the Kilo console shows as "Remaining Personal
+    Credits" -- verified against the live console at 349.05 - 325.27 =
+    $23.78.
+
+    Do NOT use ``kilo_pass_threshold`` as a limit. It is the spend level at
+    which Kilo Pass benefits kick in, NOT a budget: it is unrelated to the
+    credit balance, so ``threshold - used`` renders a confident, completely
+    fabricated "remaining" figure. An earlier revision did exactly that and
+    showed $16.35 where the console showed $23.78.
+
+    The console's per-cycle *Personal workspace* breakdown (this month's
     usage / paid / available bonus / renews-in-N-days) is only fetched by
     the Cloud console's client-side React fetch -- it requires a browser
     session cookie, not the API key. Kilo does not expose that surface
-    publicly. We surface that as an info note so the operator knows the
-    numbers are the org total, not their personal workspace view.
+    publicly, so the card reports lifetime credit rather than this month's
+    allowance.
     """
     key = _settings.kilo_api_key
 
@@ -146,8 +156,11 @@ async def _check_kilo() -> AccountProviderUsage:
             resp.raise_for_status()
             model_count = len(resp.json().get("data") or [])
 
-            # Cloud API: org-level usage to date. The 60s timeout here is
-            # generous; on normal hits this is <500ms.
+            # Cloud API: lifetime personal credit, returned in microdollars.
+            # The per-cycle "Personal workspace" breakdown the console shows is
+            # browser-session-only and unreachable with an API key, so the card
+            # reports lifetime rather than this month's allowance. The 6s
+            # timeout here is generous; on normal hits this is <500ms.
             try:
                 user_resp = await client.get(
                     "https://app.kilo.ai/api/user",
@@ -165,24 +178,16 @@ async def _check_kilo() -> AccountProviderUsage:
             limit_usd: float | None = None
             if user_resp is not None and user_resp.status_code == 200:
                 user = user_resp.json() or {}
-                spent_usd_raw = user.get("microdollars_used")
-                limit_usd_raw = user.get("kilo_pass_threshold")
+                spent_raw = user.get("microdollars_used")
                 acquired_raw = user.get("total_microdollars_acquired")
-                if spent_usd_raw is not None:
-                    spent_usd = round(float(spent_usd_raw) / 1_000_000, 4)
-                if limit_usd_raw is not None:
-                    limit_usd = round(float(limit_usd_raw) / 1_000_000, 4)
-                # `total_microdollars_acquired` is the lifetime acquisition
-                # total -- not displayed on the card today but kept here so
-                # the dashboard can surface it later without another probe.
-                _ = acquired_raw
+                if spent_raw is not None:
+                    spent_usd = round(float(spent_raw) / 1_000_000, 4)
+                if acquired_raw is not None:
+                    # Lifetime credits acquired is the real denominator:
+                    # remaining = acquired - used is the console's
+                    # "Remaining Personal Credits" figure.
+                    limit_usd = round(float(acquired_raw) / 1_000_000, 4)
 
-            # The user object returns ORG-level usage. The Kilo console's
-            # "Personal Workspace" view shows a *smaller* number for the
-            # same operator; that data is browser-session-only and not
-            # available via the API key. Surface this honestly so the
-            # operator knows why the dashboard numbers don't match their
-            # Personal Workspace tab.
             return AccountProviderUsage(
                 provider="kilo",
                 configured=True,
@@ -193,22 +198,11 @@ async def _check_kilo() -> AccountProviderUsage:
                 if (spent_usd is not None and limit_usd is not None)
                 else None,
                 model_count=model_count or None,
-                # Reuse the existing free-form error field as the
-                # honest annotation so the card stays within its current
-                # shape; the frontend will surface it as a small note.
-                error=(
-                    None
-                    if spent_usd is not None
-                    else "personal-workspace breakdown only available in browser console"
-                ),
-                # Reuse plan for the "org total" label so the card
-                # shows the user that this is the org-wide view, not
-                # their personal workspace tab.
-                plan=(
-                    "Org total"
-                    if spent_usd is not None
-                    else None
-                ),
+                error=None,
+                # Kilo exposes no per-cycle allowance via the API key, so we
+                # label the numbers as lifetime credit rather than implying
+                # they are this month's budget.
+                plan="Lifetime credit" if spent_usd is not None else None,
             )
         except Exception as exc:
             log.warning("kilo_check_failed", error=str(exc))
@@ -412,6 +406,17 @@ async def _check_deepseek() -> AccountProviderUsage:
           ]
         }
 
+    Per the API reference, ``total_balance`` is "the total available balance,
+    INCLUDING the granted balance and the topped-up balance" -- i.e.
+    ``total == granted + topped_up`` by construction. An earlier revision
+    derived ``spent = granted + topped_up - total``, which is therefore
+    identically zero and rendered a "Used" row that was never a real spend
+    figure. DeepSeek exposes no usage/spend total on this endpoint, so we
+    report no ``spent_usd`` at all rather than fabricate one.
+
+    We do surface ``is_available``: when it is false the balance cannot cover
+    an API call, which is the operationally meaningful alarm state.
+
     DeepSeek returns multiple currencies (USD + CNY); we prefer USD. Each
     entry breaks the total into *granted* (free credits the vendor gave)
     vs *topped-up* (cash the operator paid in). We surface both so the
@@ -457,19 +462,25 @@ async def _check_deepseek() -> AccountProviderUsage:
             total = _num(usd.get("total_balance"))
             granted = _num(usd.get("granted_balance"))
             topped_up = _num(usd.get("topped_up_balance"))
-            spent = (granted + topped_up) - total
+            # `is_available` is DeepSeek's own "balance can cover a call"
+            # flag. False is the alarm state, but it does NOT invalidate the
+            # balance figures -- so it goes in `warning`, not `error`, and the
+            # card still shows the remaining balance and its paid/free split.
+            # `is not False` (rather than truthiness) so an explicit null
+            # field is treated as "unknown", not as a false alarm.
+            available = payload.get("is_available", True) is not False
             return AccountProviderUsage(
                 provider="deepseek",
                 configured=True,
                 currency=str(usd.get("currency") or "USD"),
                 dashboard_url="https://platform.deepseek.com/usage",
-                # "Spent" is the live-cycle sum of granted + topped-up minus
-                # what's still on the account; clamp to >= 0 because vendors
-                # occasionally return tiny floating-point overshoot.
-                spent_usd=round(max(spent, 0.0), 4),
+                # No spent_usd: DeepSeek's balance endpoint is a snapshot,
+                # not a ledger (see the docstring). Deriving a spend figure
+                # from it is impossible.
                 remaining_usd=round(total, 4) if total else None,
                 granted_usd=round(granted, 4) if granted else None,
                 topped_up_usd=round(topped_up, 4) if topped_up else None,
+                warning=None if available else "balance too low for API calls",
             )
         except Exception as exc:
             log.warning("deepseek_check_failed", error=str(exc))
