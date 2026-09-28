@@ -141,10 +141,7 @@ class AccountProviderUsage(BaseModel):
         "openrouter",
         "kilo",
         "minimax",
-        "anthropic",
-        "openai",
         "deepseek",
-        "alibaba",
     ]
     configured: bool = False
     plan: str | None = None
@@ -174,10 +171,7 @@ class AccountsUsage(BaseModel):
     openrouter: AccountProviderUsage
     kilo: AccountProviderUsage
     minimax: AccountProviderUsage
-    anthropic: AccountProviderUsage
-    openai: AccountProviderUsage
     deepseek: AccountProviderUsage
-    alibaba: AccountProviderUsage
     fetched_at: datetime
 
 

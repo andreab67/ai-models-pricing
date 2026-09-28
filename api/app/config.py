@@ -95,7 +95,6 @@ class Settings(BaseSettings):
     openai_api_key: str = Field(default="")
     openai_admin_key: str = Field(default="")
     deepseek_api_key: str = Field(default="")
-    alibaba_api_key: str = Field(default="")
 
     # --- kilo plan (used for account widget) -----------------------------
     kilo_tier: str = Field(default="starter")

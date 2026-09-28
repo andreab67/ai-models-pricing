@@ -37,21 +37,6 @@ const META: Record<ProviderId, ProviderMeta> = {
     accent: "text-violet-400",
     description: "OpenRouter credit balance + per-model activity",
   },
-  alibaba: {
-    label: "Alibaba DashScope",
-    accent: "text-amber-400",
-    description: "Alibaba Bailian / DashScope key check",
-  },
-  anthropic: {
-    label: "Anthropic",
-    accent: "text-orange-400",
-    description: "Anthropic org billing balance",
-  },
-  openai: {
-    label: "OpenAI",
-    accent: "text-emerald-400",
-    description: "OpenAI credit-grant window",
-  },
   deepseek: {
     label: "DeepSeek",
     accent: "text-sky-400",
@@ -60,18 +45,11 @@ const META: Record<ProviderId, ProviderMeta> = {
 };
 
 // OpenRouter sits alone at the top because it's the only provider whose card
-// carries a per-model activity subtable — that table reads horizontally and
-// doesn't fit cleanly inside a 1/3-width column. The remaining six
+// carries a per-model activity subtable -- that table reads horizontally and
+// doesn't fit cleanly inside a 1/3-width column. The remaining three
 // providers share the same compact status grid below.
 const PRIMARY: ProviderId = "openrouter";
-const REST_ORDER: ProviderId[] = [
-  "minimax",
-  "kilo",
-  "alibaba",
-  "anthropic",
-  "openai",
-  "deepseek",
-];
+const REST_ORDER: ProviderId[] = ["minimax", "kilo", "deepseek"];
 
 // ---------------------------------------------------------------------------
 // Shared card body. Each provider renders the same status grid: plan, used,
