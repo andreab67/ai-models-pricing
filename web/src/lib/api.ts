@@ -132,6 +132,13 @@ export interface AccountProviderUsage {
   model_count: number | null;
   currency: string | null;
   dashboard_url: string | null;
+  // Non-USD usage fields. MiniMax returns request counts and a remaining
+  // percent per plan window rather than USD amounts; we surface both shapes
+  // here so the dashboard can render whichever the vendor provides.
+  usage_count: number | null;
+  usage_limit: number | null;
+  remaining_percent: number | null;
+  plan_models: string[] | null;
   error: string | null;
 }
 

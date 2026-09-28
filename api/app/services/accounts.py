@@ -163,10 +163,13 @@ async def _check_kilo() -> AccountProviderUsage:
 async def _check_minimax() -> AccountProviderUsage:
     """MiniMax Token Plan / coding plan balance probe.
 
-    The mmx CLI calls an internal endpoint on api.MiniMax.chat to render the
+    The mmx CLI calls an internal endpoint on api.minimax.chat to render the
     ``quota show`` view; we attempt the same surface with the user's API key.
-    The endpoint shape is best-effort: if the vendor rotates it, we surface
-    the HTTP status as the error rather than fabricating a balance.
+
+    The live endpoint returns per-plan request counts and a remaining
+    percent rather than USD amounts. We aggregate across plans and surface
+    the worst (lowest) remaining percent so the dashboard shows a single
+    status number rather than one row per plan.
     """
     key = _settings.minimax_api_key
     if not key:
@@ -198,7 +201,6 @@ async def _check_minimax() -> AccountProviderUsage:
                         error="API key invalid",
                     )
                 if resp.status_code >= 400:
-                    # Try the next endpoint before giving up.
                     log.debug(
                         "minimax_check_status",
                         url=url,
@@ -206,27 +208,81 @@ async def _check_minimax() -> AccountProviderUsage:
                     )
                     continue
                 data: dict[str, Any] = resp.json()
-                # The mmx quota view exposes ``remains``/``limit``/``used`` in
-                # either the top level or under a ``data`` envelope, depending
-                # on which surface answered.
-                bucket = data.get("data") if isinstance(data.get("data"), dict) else data
-                limit = _num(bucket.get("limit") or bucket.get("total"))
-                used = _num(bucket.get("used") or bucket.get("consumed"))
-                remains = _num(bucket.get("remains") or bucket.get("remaining"))
-                if remains or used:
-                    remaining = remains if remains else (limit - used if limit else 0.0)
+                # The live endpoint shape (api.MiniMax.io, confirmed against a
+                # real coding-plan key 2026-09) is:
+                #   {"base_resp": {"status_code": 0, ...},
+                #    "model_remains": [
+                #      {"model_name": "general",
+                #       "current_interval_usage_count": 2,
+                #       "current_interval_total_count": 3,
+                #       "current_interval_remaining_percent": 86,
+                #       "current_weekly_usage_count": 20,
+                #       "current_weekly_total_count": 21,
+                #       "current_weekly_remaining_percent": 98,
+                #       ...}, ...]}
+                # The .chat host often returns a base_resp error envelope
+                # because that surface wants a session cookie, not a bare
+                # API key. Fall through to the .io host before declaring
+                # failure so we don't lie about quota unreachable.
+                base = data.get("base_resp") if isinstance(data.get("base_resp"), dict) else None
+                if base and base.get("status_code") not in (0, None):
+                    log.debug(
+                        "minimax_base_resp_error",
+                        url=url,
+                        code=base.get("status_code"),
+                        msg=base.get("status_msg"),
+                    )
+                    continue
+                plans = data.get("model_remains")
+                if isinstance(plans, list) and plans:
+                    total_usage = 0
+                    total_limit = 0
+                    worst_pct: float | None = None
+                    model_names: list[str] = []
+                    for p in plans:
+                        if not isinstance(p, dict):
+                            continue
+                        # Read each metric with its own fallback so an
+                        # absent weekly_usage_count does NOT overwrite the
+                        # interval usage we already pulled. The vendor's
+                        # shape is per-plan and inconsistent across plans:
+                        # some plans have interval counts but no interval
+                        # remaining percent, others only have weekly fields.
+                        interval_usage = p.get("current_interval_usage_count")
+                        interval_limit = p.get("current_interval_total_count")
+                        weekly_usage = p.get("current_weekly_usage_count")
+                        weekly_limit = p.get("current_weekly_total_count")
+
+                        usage = _to_int(interval_usage if interval_usage is not None else weekly_usage)
+                        limit = _to_int(interval_limit if interval_limit is not None else weekly_limit)
+
+                        pct_raw = p.get("current_interval_remaining_percent")
+                        if pct_raw is None:
+                            pct_raw = p.get("current_weekly_remaining_percent")
+                        pct = float(pct_raw) if pct_raw is not None else None
+
+                        total_usage += usage
+                        total_limit += limit
+                        if pct is not None and (worst_pct is None or pct < worst_pct):
+                            worst_pct = pct
+                        name = p.get("model_name")
+                        if isinstance(name, str) and name and name not in model_names:
+                            model_names.append(name)
                     return AccountProviderUsage(
                         provider="minimax",
                         configured=True,
-                        currency=str(bucket.get("currency") or "USD"),
+                        currency="REQS",
                         dashboard_url=(
                             "https://MiniMax.io/user-center/basic-information/interface-key"
                         ),
-                        limit_usd=round(limit, 4) if limit else None,
-                        spent_usd=round(used, 4) if used else None,
-                        remaining_usd=round(remaining, 4) if remaining else None,
+                        usage_count=total_usage or None,
+                        usage_limit=total_limit or None,
+                        remaining_percent=round(worst_pct, 1) if worst_pct is not None else None,
+                        plan_models=model_names or None,
+                        plan=f"{len(plans)} plan{'s' if len(plans) != 1 else ''}",
                     )
-                # Unknown payload — key is at least valid.
+                # HTTP 200, no error envelope, no plan rows. Key is valid but
+                # the surface returned nothing structured -- report active.
                 return AccountProviderUsage(
                     provider="minimax",
                     configured=True,

@@ -91,25 +91,88 @@ async def test_minimax_unconfigured(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_minimax_quota_parsed(monkeypatch):
+    """Live shape (api.minimax.io, 2026-09): per-plan request counts and
+    remaining percent. We surface the worst remaining percent and the
+    aggregate usage/limit across plans; the plan names go in plan_models.
+    """
     _patch_settings(monkeypatch, minimax_api_key="sk-minimax")
     with respx.mock(assert_all_called=False) as mock:
+        # .chat returns the cookie-required error envelope so the checker
+        # falls through to .io, which returns real data.
         mock.get("https://api.MiniMax.chat/v1/api/openplatform/coding_plan/remains").respond(
             200,
             json={
-                "data": {
-                    "limit": 100.0,
-                    "used": 30.0,
-                    "remains": 70.0,
-                    "currency": "USD",
-                }
+                "base_resp": {"status_code": 1004, "status_msg": "cookie missing"},
+                "model_remains": [],
+            },
+        )
+        mock.get("https://api.MiniMax.io/v1/api/openplatform/coding_plan/remains").respond(
+            200,
+            json={
+                "base_resp": {"status_code": 0, "status_msg": "success"},
+                "model_remains": [
+                    {
+                        "model_name": "general",
+                        "current_interval_usage_count": 2,
+                        "current_interval_total_count": 3,
+                        "current_interval_remaining_percent": 86,
+                    },
+                    {
+                        "model_name": "video",
+                        "current_interval_usage_count": 20,
+                        "current_interval_total_count": 21,
+                        "current_weekly_remaining_percent": 95,
+                    },
+                ],
             },
         )
         out = await accounts._check_minimax()
     assert out.configured is True
-    assert out.limit_usd == 100.0
-    assert out.spent_usd == 30.0
-    assert out.remaining_usd == 70.0
-    assert out.currency == "USD"
+    # 22 total usage, 24 total limit across the two plans (interval when
+    # present, weekly fallback for video where interval fields are absent).
+    assert out.usage_count == 22
+    assert out.usage_limit == 24
+    # 86 is the lowest remaining percent (general's interval), beats video's
+    # 95 weekly fallback.
+    assert out.remaining_percent == 86.0
+    assert out.plan_models == ["general", "video"]
+    assert out.plan == "2 plans"
+    # Non-USD surface -- currency tag should distinguish from credit grants.
+    assert out.currency == "REQS"
+    # No fabricated USD numbers.
+    assert out.limit_usd is None
+    assert out.spent_usd is None
+
+
+@pytest.mark.asyncio
+async def test_minimax_cookie_envelope_falls_through_to_io(monkeypatch):
+    """If the .chat host returns the cookie-required error envelope but .io
+    is reachable, we use the .io payload -- the cookie envelope is NOT a
+    hard failure.
+    """
+    _patch_settings(monkeypatch, minimax_api_key="sk-minimax")
+    with respx.mock(assert_all_called=False) as mock:
+        mock.get("https://api.MiniMax.chat/v1/api/openplatform/coding_plan/remains").respond(
+            200,
+            json={"base_resp": {"status_code": 1004, "status_msg": "cookie missing"}},
+        )
+        mock.get("https://api.MiniMax.io/v1/api/openplatform/coding_plan/remains").respond(
+            200,
+            json={
+                "base_resp": {"status_code": 0, "status_msg": "success"},
+                "model_remains": [
+                    {
+                        "model_name": "general",
+                        "current_interval_usage_count": 1,
+                        "current_interval_total_count": 100,
+                        "current_interval_remaining_percent": 99,
+                    },
+                ],
+            },
+        )
+        out = await accounts._check_minimax()
+    assert out.configured is True
+    assert out.remaining_percent == 99.0
 
 
 @pytest.mark.asyncio
@@ -117,6 +180,7 @@ async def test_minimax_invalid_key(monkeypatch):
     _patch_settings(monkeypatch, minimax_api_key="sk-bad")
     with respx.mock(assert_all_called=False) as mock:
         mock.get("https://api.MiniMax.chat/v1/api/openplatform/coding_plan/remains").respond(401)
+        mock.get("https://api.MiniMax.io/v1/api/openplatform/coding_plan/remains").respond(401)
         out = await accounts._check_minimax()
     assert out.error == "API key invalid"
 
@@ -346,7 +410,18 @@ async def test_get_usage_returns_every_provider(monkeypatch):
             200, json={"data": [{"id": "m"}]}
         )
         mock.get(url__regex=r"https://api\.minimax\.(chat|io).*coding_plan.*").respond(
-            200, json={"data": {"limit": 1, "used": 0, "remains": 1}}
+            200,
+            json={
+                "base_resp": {"status_code": 0, "status_msg": "success"},
+                "model_remains": [
+                    {
+                        "model_name": "general",
+                        "current_interval_usage_count": 1,
+                        "current_interval_total_count": 100,
+                        "current_interval_remaining_percent": 99,
+                    },
+                ],
+            },
         )
         mock.get("https://api.anthropic.com/v1/organizations").respond(
             200, json={"data": [{"id": "org-1"}]}

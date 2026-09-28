@@ -133,6 +133,16 @@ class AccountProviderUsage(BaseModel):
     model_count: int | None = None
     currency: str | None = None
     dashboard_url: str | None = None
+    # Non-USD usage fields. MiniMax tracks request counts and a remaining
+    # percent per plan window instead of dollar amounts; some Anthropic /
+    # OpenAI surfaces also expose usage counts alongside the credit-grant
+    # window. These are populated when the vendor returns them and rendered
+    # by the frontend only when present -- providers that report purely in
+    # USD leave them None.
+    usage_count: int | None = None
+    usage_limit: int | None = None
+    remaining_percent: float | None = None
+    plan_models: list[str] | None = None
     error: str | None = None
 
 
