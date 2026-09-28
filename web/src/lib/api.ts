@@ -185,14 +185,7 @@ export function useHistory(modelId: string | null, days: number = 30) {
 }
 
 export interface AccountProviderUsage {
-  provider:
-    | "openrouter"
-    | "kilo"
-    | "minimax"
-    | "anthropic"
-    | "openai"
-    | "deepseek"
-    | "alibaba";
+  provider: "openrouter" | "kilo" | "minimax" | "deepseek";
   configured: boolean;
   plan: string | null;
   limit_usd: number | null;
@@ -226,10 +219,7 @@ export interface AccountsUsage {
   openrouter: AccountProviderUsage;
   kilo: AccountProviderUsage;
   minimax: AccountProviderUsage;
-  anthropic: AccountProviderUsage;
-  openai: AccountProviderUsage;
   deepseek: AccountProviderUsage;
-  alibaba: AccountProviderUsage;
   fetched_at: string;
 }
 
