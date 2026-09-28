@@ -94,6 +94,15 @@ class Settings(BaseSettings):
     openrouter_api_key: str = Field(default="")
     openrouter_admin_key: str = Field(default="")
     kilo_api_key: str = Field(default="")
+    minimax_api_key: str = Field(default="")
+    anthropic_api_key: str = Field(default="")
+    anthropic_admin_key: str = Field(default="")
+    openai_api_key: str = Field(default="")
+    openai_admin_key: str = Field(default="")
+    deepseek_api_key: str = Field(default="")
+    alibaba_api_key: str = Field(default="")
+    cursor_email: str = Field(default="")
+    cursor_plan: str = Field(default="")
 
     # --- kilo plan (account widget + daily report savings) ---------------
     # Must be a tier in kilo_plans.yaml; an unknown value fails fast at start.

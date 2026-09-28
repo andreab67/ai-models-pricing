@@ -185,20 +185,37 @@ export function useHistory(modelId: string | null, days: number = 30) {
 }
 
 export interface AccountProviderUsage {
-  provider: "openrouter" | "kilo";
+  provider:
+    | "openrouter"
+    | "kilo"
+    | "minimax"
+    | "anthropic"
+    | "openai"
+    | "deepseek"
+    | "alibaba"
+    | "cursor";
   configured: boolean;
   plan: string | null;
   limit_usd: number | null;
   spent_usd: number | null;
   remaining_usd: number | null;
   period_start: string | null;
+  period_end: string | null;
   model_count: number | null;
+  currency: string | null;
+  dashboard_url: string | null;
   error: string | null;
 }
 
 export interface AccountsUsage {
   openrouter: AccountProviderUsage;
   kilo: AccountProviderUsage;
+  minimax: AccountProviderUsage;
+  anthropic: AccountProviderUsage;
+  openai: AccountProviderUsage;
+  deepseek: AccountProviderUsage;
+  alibaba: AccountProviderUsage;
+  cursor: AccountProviderUsage;
   fetched_at: string;
 }
 

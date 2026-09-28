@@ -113,20 +113,38 @@ class KiloProjection(BaseModel):
 
 
 class AccountProviderUsage(BaseModel):
-    provider: Literal["openrouter", "kilo"]
+    provider: Literal[
+        "openrouter",
+        "kilo",
+        "minimax",
+        "anthropic",
+        "openai",
+        "deepseek",
+        "alibaba",
+        "cursor",
+    ]
     configured: bool = False
     plan: str | None = None
     limit_usd: float | None = None
     spent_usd: float | None = None
     remaining_usd: float | None = None
     period_start: str | None = None
+    period_end: str | None = None
     model_count: int | None = None
+    currency: str | None = None
+    dashboard_url: str | None = None
     error: str | None = None
 
 
 class AccountsUsage(BaseModel):
     openrouter: AccountProviderUsage
     kilo: AccountProviderUsage
+    minimax: AccountProviderUsage
+    anthropic: AccountProviderUsage
+    openai: AccountProviderUsage
+    deepseek: AccountProviderUsage
+    alibaba: AccountProviderUsage
+    cursor: AccountProviderUsage
     fetched_at: datetime
 
 
