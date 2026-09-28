@@ -101,8 +101,6 @@ class Settings(BaseSettings):
     openai_admin_key: str = Field(default="")
     deepseek_api_key: str = Field(default="")
     alibaba_api_key: str = Field(default="")
-    cursor_email: str = Field(default="")
-    cursor_plan: str = Field(default="")
 
     # --- kilo plan (account widget + daily report savings) ---------------
     # Must be a tier in kilo_plans.yaml; an unknown value fails fast at start.

@@ -58,16 +58,11 @@ const META: Record<ProviderId, ProviderMeta> = {
     accent: "text-sky-400",
     description: "DeepSeek user balance (USD)",
   },
-  cursor: {
-    label: "Cursor",
-    accent: "text-fuchsia-400",
-    description: "Cursor IDE usage (deep-link to console)",
-  },
 };
 
 // OpenRouter sits alone at the top because it's the only provider whose card
 // carries a per-model activity subtable — that table reads horizontally and
-// doesn't fit cleanly inside a 1/3-width column. The remaining seven
+// doesn't fit cleanly inside a 1/3-width column. The remaining six
 // providers share the same compact status grid below.
 const PRIMARY: ProviderId = "openrouter";
 const REST_ORDER: ProviderId[] = [
@@ -77,7 +72,6 @@ const REST_ORDER: ProviderId[] = [
   "anthropic",
   "openai",
   "deepseek",
-  "cursor",
 ];
 
 // ---------------------------------------------------------------------------
@@ -145,8 +139,62 @@ function ProviderCard({
         </div>
       ) : account.error ? (
         <p className="text-xs text-red-400">{account.error}</p>
-      ) : account.spent_usd == null && account.remaining_usd == null ? (
+      ) : account.spent_usd == null && account.remaining_usd == null && account.usage_count == null ? (
         <p className="text-xs text-emerald-400">Key active</p>
+      ) : account.usage_count != null || account.usage_limit != null || account.remaining_percent != null ? (
+        // Non-USD view: MiniMax returns request counts and a remaining
+        // percent per plan window, not dollar amounts.
+        <>
+          <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
+            <span className="text-muted">
+              {account.remaining_percent != null ? "Remaining" : "Usage"}
+            </span>
+            <span
+              className={`text-right font-mono font-semibold ${
+                account.remaining_percent == null
+                  ? "text-fg"
+                  : account.remaining_percent < 20
+                    ? "text-red-400"
+                    : account.remaining_percent < 50
+                      ? "text-yellow-400"
+                      : "text-emerald-400"
+              }`}
+            >
+              {account.remaining_percent != null
+                ? `${account.remaining_percent.toFixed(1)}%`
+                : `${(account.usage_count ?? 0).toLocaleString()} ${
+                    account.currency ?? "reqs"
+                  }`}
+            </span>
+
+            {account.usage_count != null && account.usage_limit != null && (
+              <>
+                <span className="text-muted">This period</span>
+                <span className="text-right font-mono">
+                  {account.usage_count.toLocaleString()} / {account.usage_limit.toLocaleString()}{" "}
+                  {account.currency ?? "reqs"}
+                </span>
+              </>
+            )}
+
+            {account.plan_models && account.plan_models.length > 0 && (
+              <>
+                <span className="text-muted">Plans</span>
+                <span className="text-right text-fg/70 font-mono text-xs">
+                  {account.plan_models.join(", ")}
+                </span>
+              </>
+            )}
+          </div>
+
+          {account.remaining_percent != null && (
+            <p className="text-xs text-right text-muted">
+              {account.usage_count != null && account.usage_limit != null
+                ? `${account.usage_count.toLocaleString()} of ${account.usage_limit.toLocaleString()} ${account.currency ?? "reqs"} used`
+                : `lowest remaining percent across plans`}
+            </p>
+          )}
+        </>
       ) : (
         <>
           <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
