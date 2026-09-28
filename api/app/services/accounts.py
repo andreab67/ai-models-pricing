@@ -253,8 +253,10 @@ async def _check_minimax() -> AccountProviderUsage:
                         weekly_usage = p.get("current_weekly_usage_count")
                         weekly_limit = p.get("current_weekly_total_count")
 
-                        usage = _to_int(interval_usage if interval_usage is not None else weekly_usage)
-                        limit = _to_int(interval_limit if interval_limit is not None else weekly_limit)
+                        usage_src = interval_usage if interval_usage is not None else weekly_usage
+                        limit_src = interval_limit if interval_limit is not None else weekly_limit
+                        usage = _to_int(usage_src)
+                        limit = _to_int(limit_src)
 
                         pct_raw = p.get("current_interval_remaining_percent")
                         if pct_raw is None:
