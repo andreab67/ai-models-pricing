@@ -271,11 +271,16 @@ async def _check_minimax() -> AccountProviderUsage:
                             float(weekly_pct_raw) if weekly_pct_raw is not None else None
                         )
 
-                        # Only emit a window when both the limit AND the
-                        # remaining percent are present -- a window with
-                        # usage but no limit would be a misleading "1 / ?"
-                        # on the dashboard.
-                        if interval_limit > 0 and interval_pct is not None:
+                        # Only require the remaining percent to emit a
+                        # window. The limit can legitimately be 0 for an
+                        # "unlimited" allowance (e.g. the operator's
+                        # general plan returns total_count=0 with a real
+                        # remaining percent); dropping those hides the
+                        # healthy quota from the dashboard. A usage > 0
+                        # with limit = 0 would be a vendor bug -- we
+                        # surface those with limit=0 and let the UI
+                        # render the row without a "/limit" suffix.
+                        if interval_pct is not None:
                             windows.append(
                                 QuotaWindow(
                                     name=name,
@@ -287,7 +292,7 @@ async def _check_minimax() -> AccountProviderUsage:
                             )
                             if worst_pct is None or interval_pct < worst_pct:
                                 worst_pct = interval_pct
-                        if weekly_limit > 0 and weekly_pct is not None:
+                        if weekly_pct is not None:
                             windows.append(
                                 QuotaWindow(
                                     name=name,

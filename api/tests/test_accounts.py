@@ -114,12 +114,16 @@ async def test_minimax_quota_parsed(monkeypatch):
                 "base_resp": {"status_code": 0, "status_msg": "success"},
                 "model_remains": [
                     {
+                        # Unlimited quota: limit and usage are both 0, but
+                        # the remaining percent is real -- MUST surface on
+                        # the dashboard so the operator sees the healthy
+                        # general window alongside the partly-used video.
                         "model_name": "general",
-                        "current_interval_usage_count": 2,
-                        "current_interval_total_count": 3,
-                        "current_interval_remaining_percent": 86,
-                        "current_weekly_usage_count": 1,
-                        "current_weekly_total_count": 200,
+                        "current_interval_usage_count": 0,
+                        "current_interval_total_count": 0,
+                        "current_interval_remaining_percent": 94,
+                        "current_weekly_usage_count": 0,
+                        "current_weekly_total_count": 0,
                         "current_weekly_remaining_percent": 99,
                     },
                     {
@@ -142,11 +146,14 @@ async def test_minimax_quota_parsed(monkeypatch):
     # 4 windows: general-5h, general-weekly, video-5h, video-weekly
     assert len(out.quota_windows) == 4
     by_key = {(w.name, w.period): w for w in out.quota_windows}
-    assert by_key[("general", "5h")].remaining_percent == 86.0
-    assert by_key[("general", "5h")].usage == 2
-    assert by_key[("general", "5h")].limit == 3
+    # general is the "unlimited" case -- limit and usage are both 0 but the
+    # remaining percent is still meaningful and MUST surface so the
+    # operator sees the healthy quota alongside the partly-used video.
+    assert by_key[("general", "5h")].remaining_percent == 94.0
+    assert by_key[("general", "5h")].usage == 0
+    assert by_key[("general", "5h")].limit == 0
     assert by_key[("general", "weekly")].remaining_percent == 99.0
-    assert by_key[("general", "weekly")].limit == 200
+    assert by_key[("general", "weekly")].limit == 0
     assert by_key[("video", "5h")].remaining_percent == 33.0
     assert by_key[("video", "weekly")].remaining_percent == 5.0
     # Worst across all windows is video-weekly at 5% (the lowest).
