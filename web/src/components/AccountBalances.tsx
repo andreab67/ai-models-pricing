@@ -64,11 +64,14 @@ const META: Record<ProviderId, ProviderMeta> = {
   },
 };
 
-// All eight providers, in the requested display order.
-const ORDER: ProviderId[] = [
+// OpenRouter sits alone at the top because it's the only provider whose card
+// carries a per-model activity subtable — that table reads horizontally and
+// doesn't fit cleanly inside a 1/3-width column. The remaining seven
+// providers share the same compact status grid below.
+const PRIMARY: ProviderId = "openrouter";
+const REST_ORDER: ProviderId[] = [
   "minimax",
   "kilo",
-  "openrouter",
   "alibaba",
   "anthropic",
   "openai",
@@ -309,18 +312,16 @@ export function AccountBalances() {
         <p className="text-sm text-red-400">Failed to load: {errMsg(error)}</p>
       )}
       {data && (
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {ORDER.map((id) => {
-            const account = data[id];
-            return (
-              <ProviderCard
-                key={id}
-                account={account}
-              >
-                {id === "openrouter" ? <OpenRouterActivityTable /> : null}
-              </ProviderCard>
-            );
-          })}
+        <div className="space-y-4">
+          <ProviderCard account={data[PRIMARY]}>
+            <OpenRouterActivityTable />
+          </ProviderCard>
+
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+            {REST_ORDER.map((id) => (
+              <ProviderCard key={id} account={data[id]} />
+            ))}
+          </div>
         </div>
       )}
     </div>
