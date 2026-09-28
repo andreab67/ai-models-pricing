@@ -119,24 +119,12 @@ function ProviderCard({
       </div>
 
       {!account.configured ? (
-        <div className="space-y-1">
-          <p className="text-xs text-muted">
-            Key not configured —{" "}
-            <span className="text-fg/70">
-              set the matching API key in the cluster secret
-            </span>
-          </p>
-          {account.dashboard_url && (
-            <a
-              href={account.dashboard_url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-xs text-blue-400 hover:underline"
-            >
-              Open console →
-            </a>
-          )}
-        </div>
+        <p className="text-xs text-muted">
+          Key not configured —{" "}
+          <span className="text-fg/70">
+            set the matching API key in the cluster secret
+          </span>
+        </p>
       ) : account.error ? (
         <p className="text-xs text-red-400">{account.error}</p>
       ) : account.spent_usd == null && account.remaining_usd == null && account.usage_count == null && !account.quota_windows?.length ? (
@@ -266,17 +254,6 @@ function ProviderCard({
             </p>
           )}
         </>
-      )}
-
-      {account.dashboard_url && account.configured && !account.error && (
-        <a
-          href={account.dashboard_url}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="text-xs text-blue-400 hover:underline"
-        >
-          Open vendor dashboard →
-        </a>
       )}
 
       {children}
