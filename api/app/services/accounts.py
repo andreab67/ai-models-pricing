@@ -1,10 +1,18 @@
-"""Check API key validity and fetch live credit usage where available."""
+"""Check API key validity and fetch live credit usage where available.
+
+Each provider has an async checker that returns an ``AccountProviderUsage``
+record. Checkers are deliberately forgiving: they always return a populated
+record (configured=True/False plus an optional ``error``) so a single failed
+provider never breaks the dashboard. Fields that the provider does not expose
+are left as ``None`` instead of being fabricated.
+"""
 
 from __future__ import annotations
 
 import asyncio
 import math
 from datetime import UTC, datetime
+from typing import Any
 
 import httpx
 
@@ -22,7 +30,7 @@ _CACHE_TTL = 120  # 2 min — balance data should be fairly fresh
 
 
 def _num(v: object) -> float:
-    """Coerce an OpenRouter /credits response field to a finite float.
+    """Coerce a provider balance field to a finite float.
 
     total_credits and total_usage come back as ints/floats/strings depending
     on account state, and OpenRouter occasionally returns the literals
@@ -41,7 +49,11 @@ def _num(v: object) -> float:
 async def _check_openrouter() -> AccountProviderUsage:
     key = _settings.openrouter_api_key
     if not key:
-        return AccountProviderUsage(provider="openrouter", configured=False)
+        return AccountProviderUsage(
+            provider="openrouter",
+            configured=False,
+            dashboard_url="https://openrouter.ai/settings/credits",
+        )
 
     async with httpx.AsyncClient(timeout=10.0) as client:
         try:
@@ -51,7 +63,10 @@ async def _check_openrouter() -> AccountProviderUsage:
             )
             if resp.status_code == 401:
                 return AccountProviderUsage(
-                    provider="openrouter", configured=True, error="API key invalid"
+                    provider="openrouter",
+                    configured=True,
+                    dashboard_url="https://openrouter.ai/settings/credits",
+                    error="API key invalid",
                 )
             resp.raise_for_status()
             data = resp.json().get("data", {})
@@ -66,6 +81,8 @@ async def _check_openrouter() -> AccountProviderUsage:
             return AccountProviderUsage(
                 provider="openrouter",
                 configured=True,
+                currency="USD",
+                dashboard_url="https://openrouter.ai/settings/credits",
                 spent_usd=round(total_usage, 4),
                 limit_usd=round(total_credits, 4) if total_credits else None,
                 remaining_usd=round(remaining, 4) if total_credits else None,
@@ -73,7 +90,10 @@ async def _check_openrouter() -> AccountProviderUsage:
         except Exception as exc:
             log.warning("openrouter_check_failed", error=str(exc))
             return AccountProviderUsage(
-                provider="openrouter", configured=True, error=str(exc)[:80]
+                provider="openrouter",
+                configured=True,
+                dashboard_url="https://openrouter.ai/settings/credits",
+                error=str(exc)[:80],
             )
 
 
@@ -99,6 +119,7 @@ async def _check_kilo() -> AccountProviderUsage:
             configured=False,
             plan=plan_label,
             limit_usd=limit_usd,
+            dashboard_url="https://kilo.ai/dashboard",
         )
 
     # Validate key and get model count — no balance endpoint in Kilo gateway API
@@ -110,8 +131,12 @@ async def _check_kilo() -> AccountProviderUsage:
             )
             if resp.status_code == 401:
                 return AccountProviderUsage(
-                    provider="kilo", configured=True, plan=plan_label,
-                    limit_usd=limit_usd, error="API key invalid",
+                    provider="kilo",
+                    configured=True,
+                    plan=plan_label,
+                    limit_usd=limit_usd,
+                    dashboard_url="https://kilo.ai/dashboard",
+                    error="API key invalid",
                 )
             resp.raise_for_status()
             model_count = len(resp.json().get("data") or [])
@@ -121,13 +146,396 @@ async def _check_kilo() -> AccountProviderUsage:
                 plan=plan_label,
                 limit_usd=limit_usd,
                 model_count=model_count or None,
+                dashboard_url="https://kilo.ai/dashboard",
             )
         except Exception as exc:
             log.warning("kilo_check_failed", error=str(exc))
             return AccountProviderUsage(
-                provider="kilo", configured=True, plan=plan_label,
-                limit_usd=limit_usd, error=str(exc)[:80],
+                provider="kilo",
+                configured=True,
+                plan=plan_label,
+                limit_usd=limit_usd,
+                dashboard_url="https://kilo.ai/dashboard",
+                error=str(exc)[:80],
             )
+
+
+async def _check_minimax() -> AccountProviderUsage:
+    """MiniMax Token Plan / coding plan balance probe.
+
+    The mmx CLI calls an internal endpoint on api.MiniMax.chat to render the
+    ``quota show`` view; we attempt the same surface with the user's API key.
+    The endpoint shape is best-effort: if the vendor rotates it, we surface
+    the HTTP status as the error rather than fabricating a balance.
+    """
+    key = _settings.minimax_api_key
+    if not key:
+        return AccountProviderUsage(
+            provider="minimax",
+            configured=False,
+            dashboard_url="https://MiniMax.io/user-center/basic-information/interface-key",
+        )
+
+    headers = {"Authorization": f"Bearer {key}"}
+    endpoints = (
+        # Coding Plan / Token Plan quota surface used by mmx CLI.
+        "https://api.MiniMax.chat/v1/api/openplatform/coding_plan/remains",
+        # Some accounts use the public host.
+        "https://api.MiniMax.io/v1/api/openplatform/coding_plan/remains",
+    )
+
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        for url in endpoints:
+            try:
+                resp = await client.get(url, headers=headers)
+                if resp.status_code == 401:
+                    return AccountProviderUsage(
+                        provider="minimax",
+                        configured=True,
+                        dashboard_url=(
+                            "https://MiniMax.io/user-center/basic-information/interface-key"
+                        ),
+                        error="API key invalid",
+                    )
+                if resp.status_code >= 400:
+                    # Try the next endpoint before giving up.
+                    log.debug(
+                        "minimax_check_status",
+                        url=url,
+                        status=resp.status_code,
+                    )
+                    continue
+                data: dict[str, Any] = resp.json()
+                # The mmx quota view exposes ``remains``/``limit``/``used`` in
+                # either the top level or under a ``data`` envelope, depending
+                # on which surface answered.
+                bucket = data.get("data") if isinstance(data.get("data"), dict) else data
+                limit = _num(bucket.get("limit") or bucket.get("total"))
+                used = _num(bucket.get("used") or bucket.get("consumed"))
+                remains = _num(bucket.get("remains") or bucket.get("remaining"))
+                if remains or used:
+                    remaining = remains if remains else (limit - used if limit else 0.0)
+                    return AccountProviderUsage(
+                        provider="minimax",
+                        configured=True,
+                        currency=str(bucket.get("currency") or "USD"),
+                        dashboard_url=(
+                            "https://MiniMax.io/user-center/basic-information/interface-key"
+                        ),
+                        limit_usd=round(limit, 4) if limit else None,
+                        spent_usd=round(used, 4) if used else None,
+                        remaining_usd=round(remaining, 4) if remaining else None,
+                    )
+                # Unknown payload — key is at least valid.
+                return AccountProviderUsage(
+                    provider="minimax",
+                    configured=True,
+                    dashboard_url=(
+                        "https://MiniMax.io/user-center/basic-information/interface-key"
+                    ),
+                )
+            except Exception as exc:
+                log.warning("minimax_check_failed", url=url, error=str(exc))
+                continue
+
+        return AccountProviderUsage(
+            provider="minimax",
+            configured=True,
+            dashboard_url=(
+                "https://MiniMax.io/user-center/basic-information/interface-key"
+            ),
+            error="quota endpoint unreachable",
+        )
+
+
+async def _check_anthropic() -> AccountProviderUsage:
+    """Anthropic balance probe.
+
+    Anthropic exposes ``/v1/organizations/{org_id}/billing/balance`` but the
+    org_id is tenant-scoped; with the admin key we first look up the org id
+    via ``/v1/organizations`` and then query the balance. Falls back to a
+    plain key-validity probe when no admin key is configured.
+    """
+    admin_key = _settings.anthropic_admin_key
+    user_key = _settings.anthropic_api_key
+    key = admin_key or user_key
+    if not key:
+        return AccountProviderUsage(
+            provider="anthropic",
+            configured=False,
+            dashboard_url="https://console.anthropic.com/settings/billing",
+        )
+
+    headers = {
+        "x-api-key": key,
+        "anthropic-version": "2023-06-01",
+    }
+
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        try:
+            orgs_resp = await client.get(
+                "https://api.anthropic.com/v1/organizations",
+                headers=headers,
+            )
+            if orgs_resp.status_code == 401:
+                return AccountProviderUsage(
+                    provider="anthropic",
+                    configured=True,
+                    dashboard_url="https://console.anthropic.com/settings/billing",
+                    error="API key invalid",
+                )
+            if orgs_resp.status_code == 403:
+                return AccountProviderUsage(
+                    provider="anthropic",
+                    configured=True,
+                    dashboard_url="https://console.anthropic.com/settings/billing",
+                    error="admin key required for billing",
+                )
+            orgs_resp.raise_for_status()
+            orgs = (orgs_resp.json() or {}).get("data") or []
+            if not orgs:
+                return AccountProviderUsage(
+                    provider="anthropic",
+                    configured=True,
+                    dashboard_url="https://console.anthropic.com/settings/billing",
+                    error="no organization for this key",
+                )
+            org_id = orgs[0].get("id")
+            if not isinstance(org_id, str):
+                return AccountProviderUsage(
+                    provider="anthropic",
+                    configured=True,
+                    dashboard_url="https://console.anthropic.com/settings/billing",
+                    error="organization id missing",
+                )
+            bal_resp = await client.get(
+                f"https://api.anthropic.com/v1/organizations/{org_id}/billing/balance",
+                headers=headers,
+            )
+            bal_resp.raise_for_status()
+            bal = bal_resp.json() or {}
+            # ``available_credit`` is returned in DOLLARS (e.g. 50.0 means
+            # $50 remaining). Older docs sometimes showed cents; the live admin
+            # endpoint has used dollars since 2025. If Anthropic ever rotates
+            # this back, multiply through here rather than at the UI layer.
+            remaining_usd = _num(bal.get("available_credit") or bal.get("balance"))
+            used_usd = _num(bal.get("used_credit") or bal.get("used"))
+            currency = str(bal.get("currency") or "USD")
+            return AccountProviderUsage(
+                provider="anthropic",
+                configured=True,
+                currency=currency,
+                dashboard_url="https://console.anthropic.com/settings/billing",
+                spent_usd=round(used_usd, 4) if used_usd else None,
+                remaining_usd=round(remaining_usd, 4) if remaining_usd else None,
+            )
+        except Exception as exc:
+            log.warning("anthropic_check_failed", error=str(exc))
+            return AccountProviderUsage(
+                provider="anthropic",
+                configured=True,
+                dashboard_url="https://console.anthropic.com/settings/billing",
+                error=str(exc)[:80],
+            )
+
+
+async def _check_openai() -> AccountProviderUsage:
+    """OpenAI billing probe.
+
+    ``/v1/dashboard/billing/credit_grants`` returns the active grant window
+    (total_granted, total_used, total_available, period_start/end). Requires
+    an admin key (``sk-admin-...``); with a regular key the endpoint returns
+    403 and we surface that as ``error`` so the user knows to rotate.
+    """
+    admin_key = _settings.openai_admin_key
+    user_key = _settings.openai_api_key
+    key = admin_key or user_key
+    if not key:
+        return AccountProviderUsage(
+            provider="openai",
+            configured=False,
+            dashboard_url="https://platform.openai.com/account/billing/overview",
+        )
+
+    headers = {"Authorization": f"Bearer {key}"}
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        try:
+            resp = await client.get(
+                "https://api.openai.com/v1/dashboard/billing/credit_grants",
+                headers=headers,
+            )
+            if resp.status_code == 401:
+                return AccountProviderUsage(
+                    provider="openai",
+                    configured=True,
+                    dashboard_url="https://platform.openai.com/account/billing/overview",
+                    error="API key invalid",
+                )
+            if resp.status_code == 403:
+                return AccountProviderUsage(
+                    provider="openai",
+                    configured=user_key and not admin_key,
+                    dashboard_url="https://platform.openai.com/account/billing/overview",
+                    error="admin key required for billing",
+                )
+            resp.raise_for_status()
+            grants = resp.json() or {}
+            total_granted = _num(grants.get("total_granted"))
+            total_used = _num(grants.get("total_used"))
+            total_available = _num(grants.get("total_available"))
+            return AccountProviderUsage(
+                provider="openai",
+                configured=True,
+                currency="USD",
+                dashboard_url="https://platform.openai.com/account/billing/overview",
+                spent_usd=round(total_used, 4) if total_used else None,
+                limit_usd=round(total_granted, 4) if total_granted else None,
+                remaining_usd=round(total_available, 4) if total_available else None,
+                period_start=str(grants.get("period_start") or "") or None,
+                period_end=str(grants.get("period_end") or "") or None,
+            )
+        except Exception as exc:
+            log.warning("openai_check_failed", error=str(exc))
+            return AccountProviderUsage(
+                provider="openai",
+                configured=True,
+                dashboard_url="https://platform.openai.com/account/billing/overview",
+                error=str(exc)[:80],
+            )
+
+
+async def _check_deepseek() -> AccountProviderUsage:
+    """DeepSeek user balance probe.
+
+    ``GET /user/balance`` returns a list of currency entries with
+    ``total_balance`` and ``topped_up_balance`` (string USD). No admin key is
+    required — the user key is enough.
+    """
+    key = _settings.deepseek_api_key
+    if not key:
+        return AccountProviderUsage(
+            provider="deepseek",
+            configured=False,
+            dashboard_url="https://platform.deepseek.com/usage",
+        )
+
+    headers = {"Authorization": f"Bearer {key}"}
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        try:
+            resp = await client.get(
+                "https://api.deepseek.com/user/balance",
+                headers=headers,
+            )
+            if resp.status_code == 401:
+                return AccountProviderUsage(
+                    provider="deepseek",
+                    configured=True,
+                    dashboard_url="https://platform.deepseek.com/usage",
+                    error="API key invalid",
+                )
+            resp.raise_for_status()
+            entries = (resp.json() or {}).get("balance_infos") or []
+            # DeepSeek returns multiple currencies (USD + CNY); prefer USD.
+            usd = next(
+                (e for e in entries if str(e.get("currency", "")).upper() == "USD"),
+                entries[0] if entries else None,
+            )
+            if not usd:
+                return AccountProviderUsage(
+                    provider="deepseek",
+                    configured=True,
+                    dashboard_url="https://platform.deepseek.com/usage",
+                )
+            total = _num(usd.get("total_balance"))
+            granted = _num(usd.get("granted_balance"))
+            topped_up = _num(usd.get("topped_up_balance"))
+            spent = (granted + topped_up) - total
+            return AccountProviderUsage(
+                provider="deepseek",
+                configured=True,
+                currency=str(usd.get("currency") or "USD"),
+                dashboard_url="https://platform.deepseek.com/usage",
+                spent_usd=round(spent, 4) if spent > 0 else 0.0,
+                remaining_usd=round(total, 4) if total else None,
+            )
+        except Exception as exc:
+            log.warning("deepseek_check_failed", error=str(exc))
+            return AccountProviderUsage(
+                provider="deepseek",
+                configured=True,
+                dashboard_url="https://platform.deepseek.com/usage",
+                error=str(exc)[:80],
+            )
+
+
+async def _check_alibaba() -> AccountProviderUsage:
+    """Alibaba DashScope (Bailian) account probe.
+
+    DashScope does not expose a public per-user balance REST endpoint that
+    is reliably documented; we validate the key against the free
+    ``GET /api/v1/models`` metadata endpoint (200 on valid key, 401/403 on
+    bad key) and surface a deep link to the console billing page for actual
+    spend numbers. We deliberately do NOT call the billable text-generation
+    endpoint here -- that would charge real tokens and pollute usage history.
+    """
+    key = _settings.alibaba_api_key
+    if not key:
+        return AccountProviderUsage(
+            provider="alibaba",
+            configured=False,
+            dashboard_url="https://bailian.console.aliyun.com/",
+        )
+
+    headers = {"Authorization": f"Bearer {key}"}
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        try:
+            resp = await client.get(
+                "https://dashscope.aliyuncs.com/api/v1/models",
+                headers=headers,
+            )
+            if resp.status_code in (401, 403):
+                return AccountProviderUsage(
+                    provider="alibaba",
+                    configured=True,
+                    dashboard_url="https://bailian.console.aliyun.com/",
+                    error="API key invalid",
+                )
+            resp.raise_for_status()
+            return AccountProviderUsage(
+                provider="alibaba",
+                configured=True,
+                currency="CNY",
+                dashboard_url="https://bailian.console.aliyun.com/",
+            )
+        except Exception as exc:
+            log.warning("alibaba_check_failed", error=str(exc))
+            return AccountProviderUsage(
+                provider="alibaba",
+                configured=True,
+                dashboard_url="https://bailian.console.aliyun.com/",
+                error=str(exc)[:80],
+            )
+
+
+async def _check_cursor() -> AccountProviderUsage:
+    """Cursor IDE usage.
+
+    Cursor does not expose a public REST endpoint for personal usage — usage
+    is only visible in the desktop client or the ``cursor.com`` settings page
+    behind browser auth. The dashboard card is therefore always a deep link to
+    the operator's own settings page; ``configured`` simply means we know who
+    the account belongs to (email + plan optional via env vars).
+    """
+    email = _settings.cursor_email or ""
+    plan = _settings.cursor_plan or None
+    configured = bool(email)
+    return AccountProviderUsage(
+        provider="cursor",
+        configured=configured,
+        plan=plan,
+        dashboard_url="https://www.cursor.com/settings",
+        error=None if configured else "set CURSOR_EMAIL to track this account",
+    )
 
 
 _ACTIVITY_CACHE_KEY = "accounts:activity"
@@ -207,13 +615,28 @@ async def get_usage() -> AccountsUsage:
     if cached:
         return AccountsUsage.model_validate(cached)
 
-    openrouter, kilo = await asyncio.gather(
-        _check_openrouter(),
-        _check_kilo(),
+    openrouter, kilo, minimax, anthropic, openai, deepseek, alibaba, cursor = (
+        await asyncio.gather(
+            _check_openrouter(),
+            _check_kilo(),
+            _check_minimax(),
+            _check_anthropic(),
+            _check_openai(),
+            _check_deepseek(),
+            _check_alibaba(),
+            _check_cursor(),
+            return_exceptions=False,
+        )
     )
     result = AccountsUsage(
         openrouter=openrouter,
         kilo=kilo,
+        minimax=minimax,
+        anthropic=anthropic,
+        openai=openai,
+        deepseek=deepseek,
+        alibaba=alibaba,
+        cursor=cursor,
         fetched_at=datetime.now(UTC),
     )
     await cache.set(_CACHE_KEY, result.model_dump(mode="json"), ttl=_CACHE_TTL)

@@ -8,151 +8,292 @@ import {
   type AccountProviderUsage,
 } from "@/lib/api";
 
-function OpenRouterCard({ account }: { account: AccountProviderUsage }) {
-  const { data: activityData, error: activityError } = useActivity();
+// ---------------------------------------------------------------------------
+// Per-provider metadata: display name, accent color, and order. The order
+// reflects what the operator wants to see first on the dashboard.
+// ---------------------------------------------------------------------------
 
+type ProviderId = AccountProviderUsage["provider"];
+
+interface ProviderMeta {
+  label: string;
+  accent: string;
+  description: string;
+}
+
+const META: Record<ProviderId, ProviderMeta> = {
+  minimax: {
+    label: "MiniMax",
+    accent: "text-rose-400",
+    description: "mmx token plan / coding plan balance",
+  },
+  kilo: {
+    label: "Kilo",
+    accent: "text-cyan-400",
+    description: "Kilo Code gateway plan + model access",
+  },
+  openrouter: {
+    label: "OpenRouter",
+    accent: "text-violet-400",
+    description: "OpenRouter credit balance + per-model activity",
+  },
+  alibaba: {
+    label: "Alibaba DashScope",
+    accent: "text-amber-400",
+    description: "Alibaba Bailian / DashScope key check",
+  },
+  anthropic: {
+    label: "Anthropic",
+    accent: "text-orange-400",
+    description: "Anthropic org billing balance",
+  },
+  openai: {
+    label: "OpenAI",
+    accent: "text-emerald-400",
+    description: "OpenAI credit-grant window",
+  },
+  deepseek: {
+    label: "DeepSeek",
+    accent: "text-sky-400",
+    description: "DeepSeek user balance (USD)",
+  },
+  cursor: {
+    label: "Cursor",
+    accent: "text-fuchsia-400",
+    description: "Cursor IDE usage (deep-link to console)",
+  },
+};
+
+// All eight providers, in the requested display order.
+const ORDER: ProviderId[] = [
+  "minimax",
+  "kilo",
+  "openrouter",
+  "alibaba",
+  "anthropic",
+  "openai",
+  "deepseek",
+  "cursor",
+];
+
+// ---------------------------------------------------------------------------
+// Shared card body. Each provider renders the same status grid: plan, used,
+// limit, remaining, period, plus an error/dashboard link. OpenRouter layers
+// the per-model activity table on top of this body.
+// ---------------------------------------------------------------------------
+
+function ProviderCard({
+  account,
+  children,
+}: {
+  account: AccountProviderUsage;
+  children?: React.ReactNode;
+}) {
+  const meta = META[account.provider];
   const usedPct =
     account.limit_usd && account.spent_usd != null
       ? Math.min(100, (account.spent_usd / account.limit_usd) * 100)
       : null;
 
   const usedColor =
-    usedPct == null  ? "text-muted"      :
-    usedPct > 85     ? "text-red-400"    :
-    usedPct > 60     ? "text-yellow-400" :
-    "text-emerald-400";
-
-  const totalSpend =
-    activityData?.items.reduce((s, i) => s + i.cost_usd, 0) ?? null;
+    usedPct == null
+      ? "text-muted"
+      : usedPct > 85
+        ? "text-red-400"
+        : usedPct > 60
+          ? "text-yellow-400"
+          : "text-emerald-400";
 
   return (
     <div className="rounded-lg border border-border bg-card p-4 space-y-3">
-      <div className="flex items-center justify-between">
-        <span className="font-semibold text-violet-400">OpenRouter</span>
+      <div className="flex items-start justify-between gap-2">
+        <div>
+          <span className={`font-semibold ${meta.accent}`}>{meta.label}</span>
+          <p className="text-[10px] text-muted/70 uppercase tracking-wider mt-0.5">
+            {meta.description}
+          </p>
+        </div>
         {account.plan && (
-          <span className="text-xs text-muted bg-border px-2 py-0.5 rounded">
+          <span className="text-xs text-muted bg-border px-2 py-0.5 rounded shrink-0">
             {account.plan}
           </span>
         )}
       </div>
 
       {!account.configured ? (
-        <p className="text-xs text-muted">
-          Key not configured —{" "}
-          <span className="text-fg/70">add OPENROUTER_API_KEY to cluster secret</span>
-        </p>
+        <div className="space-y-1">
+          <p className="text-xs text-muted">
+            Key not configured —{" "}
+            <span className="text-fg/70">
+              set the matching API key in the cluster secret
+            </span>
+          </p>
+          {account.dashboard_url && (
+            <a
+              href={account.dashboard_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-xs text-blue-400 hover:underline"
+            >
+              Open console →
+            </a>
+          )}
+        </div>
       ) : account.error ? (
         <p className="text-xs text-red-400">{account.error}</p>
+      ) : account.spent_usd == null && account.remaining_usd == null ? (
+        <p className="text-xs text-emerald-400">Key active</p>
       ) : (
         <>
-          {account.spent_usd != null ? (
-            <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
-              <span className="text-muted">
-                {account.period_start ? `Since ${account.period_start}` : "Total used"}
-              </span>
-              <span className="text-right font-mono">{fmtUsd(account.spent_usd)}</span>
+          <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
+            <span className="text-muted">
+              {account.period_start
+                ? `Since ${account.period_start.slice(0, 10)}`
+                : "Used"}
+            </span>
+            <span className="text-right font-mono">
+              {account.spent_usd != null ? fmtUsd(account.spent_usd) : "—"}
+            </span>
 
-              {account.limit_usd != null && (
-                <>
-                  <span className="text-muted">Credit limit</span>
-                  <span className="text-right font-mono">{fmtUsd(account.limit_usd)}</span>
-                </>
-              )}
-
-              {account.remaining_usd != null && (
-                <>
-                  <span className="text-muted">Remaining</span>
-                  <span
-                    className={`text-right font-mono font-semibold ${
-                      account.remaining_usd < 5  ? "text-red-400"    :
-                      account.remaining_usd < 20 ? "text-yellow-400" :
-                      "text-emerald-400"
-                    }`}
-                  >
-                    {fmtUsd(account.remaining_usd)}
-                  </span>
-                </>
-              )}
-            </div>
-          ) : (
-            <p className="text-xs text-emerald-400">Key active</p>
-          )}
-
-          {usedPct != null && (
-            <p className={`text-xs text-right ${usedColor}`}>{usedPct.toFixed(1)}% used</p>
-          )}
-
-          <div className="pt-2 border-t border-border space-y-2">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-semibold uppercase tracking-wider text-muted">
-                OpenRouter Models Used
-              </span>
-              {totalSpend != null && (
-                <span className="text-xs font-mono text-muted">{fmtUsd(totalSpend)}</span>
-              )}
-            </div>
-
-            {activityError && (
-              <p className="text-xs text-red-400">
-                Activity: {errMsg(activityError)}
-              </p>
+            {account.limit_usd != null && (
+              <>
+                <span className="text-muted">
+                  Limit{account.currency ? ` (${account.currency})` : ""}
+                </span>
+                <span className="text-right font-mono">
+                  {fmtUsd(account.limit_usd)}
+                </span>
+              </>
             )}
-            {!activityData && !activityError && (
-              <p className="text-xs text-muted">Loading…</p>
-            )}
-            {activityData && activityData.items.length === 0 && (
-              <p className="text-xs text-muted/60">
-                Requires OpenRouter management key —{" "}
-                <a
-                  href="https://openrouter.ai/settings/keys"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="underline hover:text-muted"
+
+            {account.remaining_usd != null && (
+              <>
+                <span className="text-muted">Remaining</span>
+                <span
+                  className={`text-right font-mono font-semibold ${
+                    account.remaining_usd < 5
+                      ? "text-red-400"
+                      : account.remaining_usd < 20
+                        ? "text-yellow-400"
+                        : "text-emerald-400"
+                  }`}
                 >
-                  generate one
-                </a>
-                {" "}and set OPENROUTER_ADMIN_KEY in cluster secret
-              </p>
-            )}
-            {activityData && activityData.items.length > 0 && (
-              <table className="w-full text-xs">
-                <thead>
-                  <tr className="text-muted border-b border-border">
-                    <th className="text-left font-normal pb-1.5">Model</th>
-                    <th className="text-right font-normal pb-1.5">Requests</th>
-                    <th className="text-right font-normal pb-1.5">In tok</th>
-                    <th className="text-right font-normal pb-1.5">Out tok</th>
-                    <th className="text-right font-normal pb-1.5">Spend</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {activityData.items.map((item) => (
-                    <tr
-                      key={item.model_id}
-                      className="border-b border-border/40 last:border-0"
-                    >
-                      <td className="py-1.5 font-mono text-fg/80">{item.model_id}</td>
-                      <td className="py-1.5 text-right font-mono">
-                        {item.requests.toLocaleString()}
-                      </td>
-                      <td className="py-1.5 text-right font-mono">
-                        {item.prompt_tokens.toLocaleString()}
-                      </td>
-                      <td className="py-1.5 text-right font-mono">
-                        {item.completion_tokens.toLocaleString()}
-                      </td>
-                      <td className="py-1.5 text-right font-mono">{fmtUsd(item.cost_usd)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+                  {fmtUsd(account.remaining_usd)}
+                </span>
+              </>
             )}
           </div>
+
+          {usedPct != null && (
+            <p className={`text-xs text-right ${usedColor}`}>
+              {usedPct.toFixed(1)}% used
+            </p>
+          )}
         </>
+      )}
+
+      {account.dashboard_url && account.configured && !account.error && (
+        <a
+          href={account.dashboard_url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-xs text-blue-400 hover:underline"
+        >
+          Open vendor dashboard →
+        </a>
+      )}
+
+      {children}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// OpenRouter card. Inherits the shared body and layers the per-model activity
+// table from /api/accounts/activity (admin key required for non-empty rows).
+// ---------------------------------------------------------------------------
+
+function OpenRouterActivityTable() {
+  const { data: activityData, error: activityError } = useActivity();
+
+  const totalSpend =
+    activityData?.items.reduce((s, i) => s + i.cost_usd, 0) ?? null;
+
+  return (
+    <div className="pt-2 border-t border-border space-y-2">
+      <div className="flex items-center justify-between">
+        <span className="text-xs font-semibold uppercase tracking-wider text-muted">
+          OpenRouter Models Used
+        </span>
+        {totalSpend != null && (
+          <span className="text-xs font-mono text-muted">{fmtUsd(totalSpend)}</span>
+        )}
+      </div>
+
+      {activityError && (
+        <p className="text-xs text-red-400">
+          Activity: {errMsg(activityError)}
+        </p>
+      )}
+      {!activityData && !activityError && (
+        <p className="text-xs text-muted">Loading…</p>
+      )}
+      {activityData && activityData.items.length === 0 && (
+        <p className="text-xs text-muted/60">
+          Requires OpenRouter management key —{" "}
+          <a
+            href="https://openrouter.ai/settings/keys"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="underline hover:text-muted"
+          >
+            generate one
+          </a>{" "}
+          and set OPENROUTER_ADMIN_KEY in cluster secret
+        </p>
+      )}
+      {activityData && activityData.items.length > 0 && (
+        <table className="w-full text-xs">
+          <thead>
+            <tr className="text-muted border-b border-border">
+              <th className="text-left font-normal pb-1.5">Model</th>
+              <th className="text-right font-normal pb-1.5">Requests</th>
+              <th className="text-right font-normal pb-1.5">In tok</th>
+              <th className="text-right font-normal pb-1.5">Out tok</th>
+              <th className="text-right font-normal pb-1.5">Spend</th>
+            </tr>
+          </thead>
+          <tbody>
+            {activityData.items.map((item) => (
+              <tr
+                key={item.model_id}
+                className="border-b border-border/40 last:border-0"
+              >
+                <td className="py-1.5 font-mono text-fg/80">{item.model_id}</td>
+                <td className="py-1.5 text-right font-mono">
+                  {item.requests.toLocaleString()}
+                </td>
+                <td className="py-1.5 text-right font-mono">
+                  {item.prompt_tokens.toLocaleString()}
+                </td>
+                <td className="py-1.5 text-right font-mono">
+                  {item.completion_tokens.toLocaleString()}
+                </td>
+                <td className="py-1.5 text-right font-mono">
+                  {fmtUsd(item.cost_usd)}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       )}
     </div>
   );
 }
+
+// ---------------------------------------------------------------------------
+// Public component: grid of provider cards.
+// ---------------------------------------------------------------------------
 
 export function AccountBalances() {
   const { data, error, isLoading } = useAccountUsage();
@@ -167,7 +308,21 @@ export function AccountBalances() {
       {error && (
         <p className="text-sm text-red-400">Failed to load: {errMsg(error)}</p>
       )}
-      {data && <OpenRouterCard account={data.openrouter} />}
+      {data && (
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {ORDER.map((id) => {
+            const account = data[id];
+            return (
+              <ProviderCard
+                key={id}
+                account={account}
+              >
+                {id === "openrouter" ? <OpenRouterActivityTable /> : null}
+              </ProviderCard>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
