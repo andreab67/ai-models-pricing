@@ -18,7 +18,13 @@ import httpx
 
 from app.config import get_settings
 from app.logging import get_logger
-from app.schemas import AccountProviderUsage, AccountsUsage, ActivityResponse, ModelActivityItem
+from app.schemas import (
+    AccountProviderUsage,
+    AccountsUsage,
+    ActivityResponse,
+    ModelActivityItem,
+    QuotaWindow,
+)
 from app.services.cache import cache
 from app.services.kilo import load_plans
 
@@ -238,41 +244,65 @@ async def _check_minimax() -> AccountProviderUsage:
                     continue
                 plans = data.get("model_remains")
                 if isinstance(plans, list) and plans:
-                    total_usage = 0
-                    total_limit = 0
+                    windows: list[QuotaWindow] = []
                     worst_pct: float | None = None
-                    model_names: list[str] = []
                     for p in plans:
                         if not isinstance(p, dict):
                             continue
-                        # Read each metric with its own fallback so an
-                        # absent weekly_usage_count does NOT overwrite the
-                        # interval usage we already pulled. The vendor's
-                        # shape is per-plan and inconsistent across plans:
-                        # some plans have interval counts but no interval
-                        # remaining percent, others only have weekly fields.
-                        interval_usage = p.get("current_interval_usage_count")
-                        interval_limit = p.get("current_interval_total_count")
-                        weekly_usage = p.get("current_weekly_usage_count")
-                        weekly_limit = p.get("current_weekly_total_count")
-
-                        usage_src = interval_usage if interval_usage is not None else weekly_usage
-                        limit_src = interval_limit if interval_limit is not None else weekly_limit
-                        usage = _to_int(usage_src)
-                        limit = _to_int(limit_src)
-
-                        pct_raw = p.get("current_interval_remaining_percent")
-                        if pct_raw is None:
-                            pct_raw = p.get("current_weekly_remaining_percent")
-                        pct = float(pct_raw) if pct_raw is not None else None
-
-                        total_usage += usage
-                        total_limit += limit
-                        if pct is not None and (worst_pct is None or pct < worst_pct):
-                            worst_pct = pct
+                        # Each model_remains entry carries BOTH a 5h interval
+                        # and a weekly counter for the same model. We expand
+                        # each entry into 1-2 windows so the dashboard can
+                        # render each quota on its own row -- showing only
+                        # the worst case across windows hides the fact that
+                        # a healthy 5h window and a partly-used weekly window
+                        # belong to the same model.
                         name = p.get("model_name")
-                        if isinstance(name, str) and name and name not in model_names:
-                            model_names.append(name)
+                        if not isinstance(name, str) or not name:
+                            name = "unknown"
+
+                        interval_usage = _to_int(p.get("current_interval_usage_count"))
+                        interval_limit = _to_int(p.get("current_interval_total_count"))
+                        interval_pct_raw = p.get("current_interval_remaining_percent")
+                        interval_pct = (
+                            float(interval_pct_raw) if interval_pct_raw is not None else None
+                        )
+
+                        weekly_usage = _to_int(p.get("current_weekly_usage_count"))
+                        weekly_limit = _to_int(p.get("current_weekly_total_count"))
+                        weekly_pct_raw = p.get("current_weekly_remaining_percent")
+                        weekly_pct = (
+                            float(weekly_pct_raw) if weekly_pct_raw is not None else None
+                        )
+
+                        # Only emit a window when both the limit AND the
+                        # remaining percent are present -- a window with
+                        # usage but no limit would be a misleading "1 / ?"
+                        # on the dashboard.
+                        if interval_limit > 0 and interval_pct is not None:
+                            windows.append(
+                                QuotaWindow(
+                                    name=name,
+                                    period="5h",
+                                    usage=interval_usage,
+                                    limit=interval_limit,
+                                    remaining_percent=interval_pct,
+                                )
+                            )
+                            if worst_pct is None or interval_pct < worst_pct:
+                                worst_pct = interval_pct
+                        if weekly_limit > 0 and weekly_pct is not None:
+                            windows.append(
+                                QuotaWindow(
+                                    name=name,
+                                    period="weekly",
+                                    usage=weekly_usage,
+                                    limit=weekly_limit,
+                                    remaining_percent=weekly_pct,
+                                )
+                            )
+                            if worst_pct is None or weekly_pct < worst_pct:
+                                worst_pct = weekly_pct
+
                     return AccountProviderUsage(
                         provider="minimax",
                         configured=True,
@@ -280,11 +310,12 @@ async def _check_minimax() -> AccountProviderUsage:
                         dashboard_url=(
                             "https://MiniMax.io/user-center/basic-information/interface-key"
                         ),
-                        usage_count=total_usage or None,
-                        usage_limit=total_limit or None,
+                        # plan badge is fixed (single Token Plan subscription);
+                        # the model_remains array is a list of QUOTA WINDOWS
+                        # inside that subscription, not a list of plans.
+                        plan="Token Plan",
+                        quota_windows=windows or None,
                         remaining_percent=round(worst_pct, 1) if worst_pct is not None else None,
-                        plan_models=model_names or None,
-                        plan=f"{len(plans)} plan{'s' if len(plans) != 1 else ''}",
                     )
                 # HTTP 200, no error envelope, no plan rows. Key is valid but
                 # the surface returned nothing structured -- report active.

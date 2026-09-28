@@ -91,9 +91,11 @@ async def test_minimax_unconfigured(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_minimax_quota_parsed(monkeypatch):
-    """Live shape (api.minimax.io, 2026-09): per-plan request counts and
-    remaining percent. We surface the worst remaining percent and the
-    aggregate usage/limit across plans; the plan names go in plan_models.
+    """Live shape (api.minimax.io, 2026-09): each model_remains entry has
+    BOTH a 5h interval and a weekly counter for the same model. We expand
+    each entry into 1-2 QuotaWindow records so the dashboard can render
+    each quota on its own row. The plan is a single Token Plan subscription;
+    the model_remains array is NOT a list of plans.
     """
     _patch_settings(monkeypatch, minimax_api_key="sk-minimax")
     with respx.mock(assert_all_called=False) as mock:
@@ -116,32 +118,47 @@ async def test_minimax_quota_parsed(monkeypatch):
                         "current_interval_usage_count": 2,
                         "current_interval_total_count": 3,
                         "current_interval_remaining_percent": 86,
+                        "current_weekly_usage_count": 1,
+                        "current_weekly_total_count": 200,
+                        "current_weekly_remaining_percent": 99,
                     },
                     {
                         "model_name": "video",
-                        "current_interval_usage_count": 20,
-                        "current_interval_total_count": 21,
-                        "current_weekly_remaining_percent": 95,
+                        "current_interval_usage_count": 2,
+                        "current_interval_total_count": 3,
+                        "current_interval_remaining_percent": 33,
+                        "current_weekly_usage_count": 20,
+                        "current_weekly_total_count": 21,
+                        "current_weekly_remaining_percent": 5,
                     },
                 ],
             },
         )
         out = await accounts._check_minimax()
     assert out.configured is True
-    # 22 total usage, 24 total limit across the two plans (interval when
-    # present, weekly fallback for video where interval fields are absent).
-    assert out.usage_count == 22
-    assert out.usage_limit == 24
-    # 86 is the lowest remaining percent (general's interval), beats video's
-    # 95 weekly fallback.
-    assert out.remaining_percent == 86.0
-    assert out.plan_models == ["general", "video"]
-    assert out.plan == "2 plans"
-    # Non-USD surface -- currency tag should distinguish from credit grants.
+    assert out.plan == "Token Plan"
     assert out.currency == "REQS"
+    assert out.quota_windows is not None
+    # 4 windows: general-5h, general-weekly, video-5h, video-weekly
+    assert len(out.quota_windows) == 4
+    by_key = {(w.name, w.period): w for w in out.quota_windows}
+    assert by_key[("general", "5h")].remaining_percent == 86.0
+    assert by_key[("general", "5h")].usage == 2
+    assert by_key[("general", "5h")].limit == 3
+    assert by_key[("general", "weekly")].remaining_percent == 99.0
+    assert by_key[("general", "weekly")].limit == 200
+    assert by_key[("video", "5h")].remaining_percent == 33.0
+    assert by_key[("video", "weekly")].remaining_percent == 5.0
+    # Worst across all windows is video-weekly at 5% (the lowest).
+    assert out.remaining_percent == 5.0
     # No fabricated USD numbers.
     assert out.limit_usd is None
     assert out.spent_usd is None
+    # Legacy aggregates intentionally cleared -- the per-window view is the
+    # canonical display path now.
+    assert out.usage_count is None
+    assert out.usage_limit is None
+    assert out.plan_models is None
 
 
 @pytest.mark.asyncio
@@ -172,7 +189,12 @@ async def test_minimax_cookie_envelope_falls_through_to_io(monkeypatch):
         )
         out = await accounts._check_minimax()
     assert out.configured is True
-    assert out.remaining_percent == 99.0
+    # 5h window only (no weekly fields on this entry).
+    assert out.quota_windows is not None
+    assert len(out.quota_windows) == 1
+    assert out.quota_windows[0].name == "general"
+    assert out.quota_windows[0].period == "5h"
+    assert out.quota_windows[0].remaining_percent == 99.0
 
 
 @pytest.mark.asyncio
