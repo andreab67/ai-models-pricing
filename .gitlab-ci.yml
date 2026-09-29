@@ -118,7 +118,7 @@ build:api:
       # overwrite :latest with unmerged code: k8s/ manifests still reference it.
       # CI_COMMIT_BRANCH is unset in MR pipelines, so the test is false there.
       set -- --destination "${IMAGE_API}:${TAG}"
-      if [ "${CI_COMMIT_BRANCH:-}" = "${CI_DEFAULT_BRANCH}" ]; then
+      if [ -n "${CI_COMMIT_BRANCH:-}" ] && [ "${CI_COMMIT_BRANCH}" = "${CI_DEFAULT_BRANCH}" ]; then
         set -- "$@" --destination "${IMAGE_API}:latest"
       fi
       echo "Building ${IMAGE_API}:${TAG} ($*)"
@@ -151,7 +151,7 @@ build:web:
       TAG="${CI_COMMIT_TAG:-${CI_COMMIT_SHORT_SHA}}"
       # :latest only from the default branch -- see build:api.
       set -- --destination "${IMAGE_WEB}:${TAG}"
-      if [ "${CI_COMMIT_BRANCH:-}" = "${CI_DEFAULT_BRANCH}" ]; then
+      if [ -n "${CI_COMMIT_BRANCH:-}" ] && [ "${CI_COMMIT_BRANCH}" = "${CI_DEFAULT_BRANCH}" ]; then
         set -- "$@" --destination "${IMAGE_WEB}:latest"
       fi
       echo "Building ${IMAGE_WEB}:${TAG} ($*)"
