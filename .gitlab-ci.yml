@@ -113,12 +113,19 @@ build:api:
   script:
     - |
       TAG="${CI_COMMIT_TAG:-${CI_COMMIT_SHORT_SHA}}"
-      echo "Building ${IMAGE_API}:${TAG}"
+      # Only default-branch pipelines move the shared :latest tag. MR pipelines
+      # still build and push :<sha> (so the build is validated), but must not
+      # overwrite :latest with unmerged code: k8s/ manifests still reference it.
+      # CI_COMMIT_BRANCH is unset in MR pipelines, so the test is false there.
+      set -- --destination "${IMAGE_API}:${TAG}"
+      if [ -n "${CI_COMMIT_BRANCH:-}" ] && [ "${CI_COMMIT_BRANCH}" = "${CI_DEFAULT_BRANCH}" ]; then
+        set -- "$@" --destination "${IMAGE_API}:latest"
+      fi
+      echo "Building ${IMAGE_API}:${TAG} ($*)"
       /kaniko/executor \
         --context "dir://${CI_PROJECT_DIR}/api" \
         --dockerfile "${CI_PROJECT_DIR}/api/Dockerfile" \
-        --destination "${IMAGE_API}:${TAG}" \
-        --destination "${IMAGE_API}:latest" \
+        "$@" \
         --skip-tls-verify \
         --snapshot-mode=redo \
         --push-retry=3
@@ -142,12 +149,16 @@ build:web:
   script:
     - |
       TAG="${CI_COMMIT_TAG:-${CI_COMMIT_SHORT_SHA}}"
-      echo "Building ${IMAGE_WEB}:${TAG}"
+      # :latest only from the default branch -- see build:api.
+      set -- --destination "${IMAGE_WEB}:${TAG}"
+      if [ -n "${CI_COMMIT_BRANCH:-}" ] && [ "${CI_COMMIT_BRANCH}" = "${CI_DEFAULT_BRANCH}" ]; then
+        set -- "$@" --destination "${IMAGE_WEB}:latest"
+      fi
+      echo "Building ${IMAGE_WEB}:${TAG} ($*)"
       /kaniko/executor \
         --context "dir://${CI_PROJECT_DIR}/web" \
         --dockerfile "${CI_PROJECT_DIR}/web/Dockerfile" \
-        --destination "${IMAGE_WEB}:${TAG}" \
-        --destination "${IMAGE_WEB}:latest" \
+        "$@" \
         --skip-tls-verify \
         --snapshot-mode=redo \
         --push-retry=3
