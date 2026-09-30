@@ -98,7 +98,7 @@ export default function AboutPage() {
             <ul className="space-y-1 text-sm text-fg/70 ml-7">
               <li>• Kubernetes for orchestration and scaling</li>
               <li>• CronJobs for automated pricing refresh & reporting</li>
-              <li>• Traefik ingress with cert-manager TLS</li>
+              <li>• Traefik Gateway API routing with TLS</li>
               <li>• Prometheus metrics and structured logging</li>
             </ul>
           </div>

@@ -41,7 +41,7 @@ This dashboard solves all of these problems by:
 | --- | --- | --- |
 | **FastAPI Backend** | `api/` | Pricing aggregation, normalization, caching, historical tracking |
 | **Next.js Dashboard** | `web/` | Modern responsive UI with real-time charts and dark mode |
-| **Kubernetes Manifests** | `k8s/` | Production-ready deployment (Traefik, cert-manager, CronJobs) |
+| **Kubernetes Manifests** | `k8s/` | Production-ready deployment (Traefik Gateway API, CronJobs) |
 | **Local Dev Stack** | `docker-compose.yml` | Self-contained environment (Postgres + Redis + API + Web) |
 | **Feature Docs** | `FUNCTIONAL.md` | Complete API reference and data models |
 | **Component Inventory** | `SBOM.md` | All dependencies with licenses and security notes |
@@ -188,18 +188,19 @@ docker push <registry>/web:latest
 kubectl apply -k k8s/overlays/prod
 
 # 3. Verify
-kubectl -n model-pricing get pods,svc,ingress
+kubectl -n model-pricing get pods,svc,httproute
 kubectl -n model-pricing logs deploy/api -f
 ```
 
 **Configure TLS:**
 ```bash
-# TLS is provisioned via cert-manager against the existing `models-tls`
-# secret that the base Ingress (k8s/base/ingress.yaml) already references.
-# No manual Certificate apply is needed if cert-manager + a ClusterIssuer
-# named `letsencrypt-prod` are installed in the cluster; otherwise create
-# a Certificate manifest at k8s/overlays/prod/certificate.yaml referencing
-# the cluster issuer, then `kubectl apply -f k8s/overlays/prod/certificate.yaml`.
+# Public traffic enters through the shared Traefik Gateway (ns traefik):
+# listener `models-https` (host models.andrea-house.com) terminates TLS and
+# k8s/base/httproute.yaml routes it to svc/web:3000. The listener's cert is
+# the Secret `models-andrea-house-tls` in this namespace, issued by the
+# home-lab CFSSL CA and applied out of band (not in git); the ReferenceGrant
+# `allow-traefik-tls` lets the Gateway read it. To renew, reissue the cert
+# for models.andrea-house.com and replace that Secret.
 ```
 
 ## Architecture
@@ -293,7 +294,7 @@ Extend `api/app/jobs/daily_report.py` with:
 ## Security
 
 - **No secrets in code**: All credentials via environment or Kubernetes secrets
-- **TLS everywhere**: cert-manager auto-renews certificates
+- **TLS everywhere**: terminated at the Traefik Gateway with a home-lab CA certificate
 - **Audit logging**: All API requests logged with timestamp, user, and response
 - **CORS**: Configured for same-origin requests only
 - **Rate limiting**: Optional throttling via middleware (not enabled by default)
@@ -312,7 +313,7 @@ Extend `api/app/jobs/daily_report.py` with:
 
 - **Backend**: Python 3.14, FastAPI, SQLAlchemy 2.0, Pydantic 2.0, Postgres, Redis
 - **Frontend**: Node.js 22, Next.js 15, React 19, TypeScript, Tailwind CSS, Recharts
-- **Infrastructure**: Docker, Kubernetes 1.28+, Traefik, cert-manager
+- **Infrastructure**: Docker, Kubernetes 1.28+, Traefik (Gateway API)
 
 See `SBOM.md` for complete dependency inventory and license compliance.
 

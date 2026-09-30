@@ -348,7 +348,7 @@ The browser calls `/api/*` on the web origin. A Next.js route handler reads `API
 ## Security
 
 - **No secrets in code**: Credentials come from the environment or Kubernetes secrets; `secret.example.yaml` holds placeholders only
-- **Public surface**: Only the web Service is exposed through the ingress. The API is ClusterIP, and the web proxy forwards an allowlist (see Web proxy)
+- **Public surface**: Only the web Service is exposed, through the Traefik Gateway HTTPRoute. The API is ClusterIP, and the web proxy forwards an allowlist (see Web proxy)
 - **Account data**: Hidden unless `EXPOSE_ACCOUNT_DATA=true`
 - **Metrics**: Labelled by route template, so arbitrary URLs cannot create unbounded Prometheus series
 - **Containers**: Non-root (UID 1000), capabilities dropped, read-only root filesystems with emptyDir mounts where the process writes
