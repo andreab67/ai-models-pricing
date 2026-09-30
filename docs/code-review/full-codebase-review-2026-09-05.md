@@ -107,7 +107,7 @@ Stable IDs and final disposition. "refuted" = skeptic-verified false positive;
 | ID | Severity | Disposition | Summary |
 |---|---|---|---|
 | INF-001 | high | **confirmed → fixed** | `kilo-diff` CronJob envFrom pointed at non-existent `model-pricing-config`/`-secrets`. Renamed to match every other workload (`sr-models-config`/`-secrets`). User reported `sr-models` namespace itself does not exist; follow-up rename commit collapsed both layers to `model-pricing-config`/`model-pricing-secrets`. |
-| INF-002 | medium | **confirmed → fixed** | `cronjob-daily-report` image hard-coded to `gitlab.cloudreviewer.net:5050/andreab/sr-models/api:latest`. Now `gitlab.andrea-house.com:5050/root/model-pricing/api:latest` matching the prod overlay. |
+| INF-002 | medium | **confirmed → fixed** | `cronjob-daily-report` image hard-coded to a retired legacy registry host. Now `gitlab.andrea-house.com:5050/root/model-pricing/api:latest` matching the prod overlay. |
 | INF-003 | medium | **confirmed → fixed** | `cronjob-refresh-pricing` same divergence as INF-002. Fixed. |
 | INF-004 | medium | **partial → fixed** | `kustomization.yaml` resources list didn't include `secret.example.yaml` (intentional — it's a template) but the workload refs were inconsistent. Reconciled by the namespace/secret rename. |
 | INF-005 | medium | **confirmed → fixed** | `scan:api-trivy` / `scan:web-trivy` scanned `python:3.14-slim` / `node:22-alpine` directly, not the built api/web images. Renamed to `scan:api-base-trivy` / `scan:web-base-trivy` with comments making scope explicit. |

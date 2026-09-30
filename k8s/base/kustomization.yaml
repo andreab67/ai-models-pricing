@@ -11,7 +11,7 @@ resources:
   - api-service.yaml
   - web-deployment.yaml
   - web-service.yaml
-  - ingress.yaml
+  - httproute.yaml
   - cronjob-refresh-pricing.yaml
   - cronjob-daily-report.yaml
   - cronjob-kilo-diff.yaml

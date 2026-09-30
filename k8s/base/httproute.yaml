@@ -1,0 +1,15 @@
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: models
+spec:
+  parentRefs:
+    - name: traefik
+      namespace: traefik
+      sectionName: models-https
+  hostnames:
+    - models.andrea-house.com
+  rules:
+    - backendRefs:
+        - name: web
+          port: 3000

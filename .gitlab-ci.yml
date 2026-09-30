@@ -210,7 +210,7 @@ deploy:k8s:
   needs: [build:api, build:web, test:db-migrations, test:api]
   environment:
     name: production
-    url: https://models.cloudreviewer.net
+    url: https://models.andrea-house.com
   script:
     - echo "${KUBE_CONFIG}" | base64 -d > /tmp/kubeconfig
     - export KUBECONFIG=/tmp/kubeconfig
