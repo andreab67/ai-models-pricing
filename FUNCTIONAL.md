@@ -254,7 +254,7 @@ These are reachable through the web proxy only when `EXPOSE_ACCOUNT_DATA=true`.
 1. **Dashboard (`/`)**: The account panel (when exposed) and the Top 10 coding models
 2. **Model detail modal**: Context, max output, speed and latency, tool/vision support, your 30-day usage (when exposed), the four-channel comparison table and bar chart, and a 30-day price history on a time axis. The Kilo Pass row uses `KILO_TIER` at the steady-state streak. Load errors are shown in the dialog
 3. **All Models (`/trends`)**: The full catalog table, opening the same modal
-4. **Pricing Trends (`/pricing-trends`)**: The Kilo Pass calculator (tier, streak, annual) and price trends over time
+4. **Pricing Trends (`/pricing-trends`)**: Price trends over time for the top coding models
 5. **Speed (`/speed`)**: Live model-speed benchmark (see Core Features 7)
 6. **About**: Feature overview, architecture, and integration notes
 

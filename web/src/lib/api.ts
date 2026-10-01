@@ -52,15 +52,6 @@ export interface KiloPlan {
   annual_bonus_pct: number | null;
 }
 
-export interface KiloProjection {
-  tier: string;
-  streak_months: number;
-  paid_credits_usd: number;
-  bonus_pct: number;
-  bonus_credits_usd: number;
-  total_effective_credits_usd: number;
-}
-
 export class ApiError extends Error {
   constructor(
     message: string,
@@ -164,19 +155,6 @@ export function useComparison(
 
 export function useKiloPlans() {
   return useSWR<KiloPlan[]>("/api/kilo/plans", fetcher, defaultConfig);
-}
-
-export function useKiloProjection(
-  tier: string,
-  streakMonths: number,
-  annual: boolean,
-) {
-  const url = `/api/kilo/projection?${new URLSearchParams({
-    tier,
-    streak_months: String(clampStreak(streakMonths)),
-    annual: String(annual),
-  })}`;
-  return useSWR<KiloProjection>(url, fetcher, defaultConfig);
 }
 
 export function useHistory(modelId: string | null, days: number = 30) {
