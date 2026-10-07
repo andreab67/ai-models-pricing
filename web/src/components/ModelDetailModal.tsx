@@ -231,7 +231,7 @@ export function ModelDetailModal({
               </div>
             )}
 
-            {history && history.length > 1 && (
+            {history && history.length >= 1 && (
               <>
                 <h3 className="mt-4 mb-2 text-sm font-semibold uppercase opacity-70">
                   30-day price history ({history.length} snapshots)
