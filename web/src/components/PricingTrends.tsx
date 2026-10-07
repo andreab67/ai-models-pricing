@@ -46,7 +46,7 @@ export function PricingTrends() {
             })}
           </div>
 
-          {history && history.length > 1 ? (
+          {history && history.length >= 1 ? (
             <div className="h-72">
               <PriceHistoryChart history={history} strokeWidth={2} />
             </div>
