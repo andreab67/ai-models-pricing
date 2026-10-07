@@ -15,12 +15,18 @@ lint:web:
   image: node:22-alpine
   script:
     - cd web
-    - npm install --frozen-lockfile
+    # `npm ci` fails if package-lock.json is out of sync with package.json
+    # (`--frozen-lockfile` is a yarn flag that npm silently ignores). It wipes
+    # node_modules/ first, so cache npm's download cache instead.
+    - npm ci --no-audit --no-fund --prefer-offline --cache .npm
     - npm run lint
     - npm run typecheck
   cache:
+    key:
+      files:
+        - web/package-lock.json
     paths:
-      - web/node_modules/
+      - web/.npm/
   only:
     - merge_requests
     - main
