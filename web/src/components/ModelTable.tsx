@@ -28,6 +28,7 @@ export function ModelTable({ onSelect }: Props) {
   const rows = useMemo<ModelPricing[]>(() => {
     if (!data) return [];
     const q = query.trim().toLowerCase();
+
     const filtered = q
       ? data.filter(
           (m) =>
@@ -36,16 +37,24 @@ export function ModelTable({ onSelect }: Props) {
             (m.provider ?? "").toLowerCase().includes(q),
         )
       : data;
+
     const sorted = [...filtered].sort((a, b) => {
       const av = a[sort];
       const bv = b[sort];
+
       if (av == null && bv == null) return 0;
+
       if (av == null) return 1;
+
       if (bv == null) return -1;
+
       if (av < bv) return asc ? -1 : 1;
+
       if (av > bv) return asc ? 1 : -1;
+
       return 0;
     });
+
     return sorted;
   }, [data, query, sort, asc]);
 
@@ -58,6 +67,7 @@ export function ModelTable({ onSelect }: Props) {
       setSort(k);
       setAsc(true);
     }
+
     setPage(0);
   };
 
@@ -72,7 +82,7 @@ export function ModelTable({ onSelect }: Props) {
         <h2 className="text-lg font-semibold">All models</h2>
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-1 text-xs" role="group" aria-label="Page size">
-            {([25, 50, 100, null] as (number | null)[]).map((v) => (
+            {[25, 50, 100, null].map((v) => (
               <button
                 key={v ?? "all"}
                 type="button"
@@ -258,6 +268,7 @@ function Th({
 }) {
   const active = sort === k;
   const align = numeric ? "text-right" : center ? "text-center" : "";
+
   return (
     <th
       className={`cursor-pointer px-2 py-1 ${align}`}

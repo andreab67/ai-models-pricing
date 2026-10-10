@@ -19,18 +19,19 @@ import {
   fmtLatency,
   fmtSpeed,
   fmtUsd,
+  type Channel,
   useActivity,
   useComparison,
   useHistory,
 } from "@/lib/api";
 import { CHART_BLUE, CHART_GREEN } from "@/lib/chartColors";
 
-const CHANNEL_LABEL: Record<string, string> = {
+const CHANNEL_LABEL = {
   openrouter_payg: "OpenRouter PAYG",
   openrouter_byok: "OpenRouter BYOK",
   kilo_pass: "Kilo Pass",
   kilo_byok: "Kilo BYOK",
-};
+} satisfies Record<Channel, string>;
 
 interface Props {
   modelId: string | null;
@@ -58,6 +59,7 @@ export function ModelDetailModal({
     kiloStreakMonths,
     kiloAnnual,
   );
+
   const { data: history } = useHistory(modelId, 30);
   const { data: activity } = useActivity();
   const myUsage = activity?.items.find((i) => i.model_id === modelId);
@@ -65,33 +67,49 @@ export function ModelDetailModal({
   // Focus close button when modal opens; restore focus on close
   useEffect(() => {
     if (!modelId) return;
+    // SAFETY: `document.activeElement` is `Element | null`; we only call
+    // `.focus()` on `HTMLElement`, so narrowing to `HTMLElement | null`
+    // is the actual call-site contract.
     const prev = document.activeElement as HTMLElement | null;
     closeRef.current?.focus();
+
     return () => prev?.focus();
   }, [modelId]);
 
   // Escape + focus trap
   useEffect(() => {
     if (!modelId) return;
+
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") { onClose(); return; }
+      if (e.key === "Escape") {
+        onClose();
+
+        return;
+      }
+
       if (e.key !== "Tab") return;
       const dialog = dialogRef.current;
+
       if (!dialog) return;
+
       const focusable = Array.from(
         dialog.querySelectorAll<HTMLElement>(
           'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
         ),
       ).filter((el) => !el.hasAttribute("disabled"));
+
       const first = focusable[0];
       const last = focusable[focusable.length - 1];
+
       if (e.shiftKey) {
         if (document.activeElement === first) { e.preventDefault(); last?.focus(); }
       } else {
         if (document.activeElement === last) { e.preventDefault(); first?.focus(); }
       }
     };
+
     window.addEventListener("keydown", onKey);
+
     return () => window.removeEventListener("keydown", onKey);
   }, [modelId, onClose]);
 

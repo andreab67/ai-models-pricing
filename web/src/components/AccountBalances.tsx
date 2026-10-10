@@ -50,6 +50,7 @@ const META: Record<ProviderId, ProviderMeta> = {
 // doesn't fit cleanly inside a 1/3-width column. The remaining three
 // providers share the same compact status grid below.
 const PRIMARY: ProviderId = "openrouter";
+
 const REST_ORDER: ProviderId[] = ["minimax", "kilo", "deepseek"];
 
 // Color for a remaining USD balance: red under $5, yellow under $20.
@@ -71,6 +72,7 @@ function ProviderCard({
   children?: React.ReactNode;
 }) {
   const meta = META[account.provider];
+
   const usedPct =
     account.limit_usd && account.spent_usd != null
       ? Math.min(100, (account.spent_usd / account.limit_usd) * 100)
@@ -134,10 +136,12 @@ function ProviderCard({
                 : w.remaining_percent < 50
                   ? "text-yellow-400"
                   : "text-emerald-400";
+
             // limit=0 means the vendor reports no request cap for this
             // window (usage=0 too). Show the percent alone rather than a
             // misleading "0/0".
             const showLimit = w.limit > 0;
+
             return (
               <div
                 key={`${w.name}-${w.period}-${i}`}
