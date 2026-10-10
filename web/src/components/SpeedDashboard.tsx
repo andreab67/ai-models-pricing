@@ -18,6 +18,7 @@ function GwBadge({ gw }: { gw: Gateway }) {
       </span>
     );
   }
+
   return (
     <span className="inline-block text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-sky-600 text-white mr-1.5">
       OPENROUTER
@@ -32,6 +33,7 @@ function StatusCell({ status, error }: { status: ProbeStatus; error: string | nu
       : status === "throttled"
         ? "text-yellow-400"
         : "text-red-400";
+
   return (
     <span className={cls} title={error ?? undefined}>
       {status}
@@ -42,6 +44,7 @@ function StatusCell({ status, error }: { status: ProbeStatus; error: string | nu
 function Delta({ d }: { d: number | null }) {
   if (d == null) return <span className="opacity-50">—</span>;
   const cls = d >= 0 ? "text-green-400" : "text-red-400";
+
   return (
     <span className={cls}>
       {d >= 0 ? "+" : ""}
@@ -53,8 +56,11 @@ function Delta({ d }: { d: number | null }) {
 function sortResults(results: SpeedProbeResult[]): SpeedProbeResult[] {
   return [...results].sort((a, b) => {
     if (a.score_ms != null && b.score_ms != null) return a.score_ms - b.score_ms;
+
     if (a.score_ms != null) return -1;
+
     if (b.score_ms != null) return 1;
+
     return 0;
   });
 }
@@ -64,6 +70,7 @@ export function SpeedDashboard() {
   const { data: runs } = useSpeedRuns(10);
 
   if (isLoading) return <p className="text-sm opacity-60">Loading…</p>;
+
   if (error) {
     return (
       <div className="border-l-4 border-red-500 pl-3 py-2 text-sm text-red-400 rounded bg-card">
@@ -74,6 +81,7 @@ export function SpeedDashboard() {
       </div>
     );
   }
+
   if (!snap) return null;
 
   const chain = snap.chain && snap.chain.entries.length > 0 ? snap.chain : null;

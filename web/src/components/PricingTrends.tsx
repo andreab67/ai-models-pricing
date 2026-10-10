@@ -28,6 +28,7 @@ export function PricingTrends() {
           <div className="mb-4 flex flex-wrap gap-2" role="group" aria-label="Select model">
             {models.map((r) => {
               const active = modelId === r.model.id;
+
               return (
                 <button
                   key={r.model.id}

@@ -8,6 +8,7 @@ const emptySubscribe = () => () => {};
 
 export function ThemeToggle() {
   const { theme, setTheme } = useTheme();
+
   // Hydration-safe mount detection without setState-in-effect
   // (see https://react.dev/learn/you-might-not-need-an-effect).
   const mounted = useSyncExternalStore(
@@ -21,6 +22,7 @@ export function ThemeToggle() {
   }
 
   const isDark = theme === "dark";
+
   return (
     <button
       type="button"

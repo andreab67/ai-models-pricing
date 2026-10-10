@@ -62,22 +62,89 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * Generic type predicate: `value` is a string. Generic form preserves
+ * the input type so callers don't lose evidence when narrowing.
+ */
+function isString<T>(value: T): value is Extract<T, string> {
+  return typeof value === "string";
+}
+
+/**
+ * Type predicate: `value` matches the API's error body contract. `detail` is
+ * accepted as `string | unknown[]` because FastAPI surfaces validation
+ * errors as an array of objects (each with `loc`/`msg`/`type`); the consumer
+ * in `errorDetail` returns the "Invalid request parameters" message for any
+ * non-string `detail`, mirroring the prior behaviour.
+ */
+function isApiErrorBody(
+  value: unknown,
+): value is { detail?: string | unknown[] } {
+  if (typeof value !== "object" || value === null) return false;
+  // SAFETY: We just proved `value` is a non-null object; reading its optional
+  // `detail` field can only yield `undefined | unknown`, never throw.
+  const detail = (value as { detail?: unknown }).detail;
+
+  return detail === undefined || isString(detail) || Array.isArray(detail);
+}
+
+/**
+ * Type predicate: `value` is a non-null object with a `message` field that
+ * is a string (e.g. a thrown `{ message: "..." }` or an `Error`). Uses an
+ * intersection rather than `Extract` so the optional `message?` on
+ * `ThrownValue`'s object branch is narrowed to a required `message: string`,
+ * matching the runtime check.
+ */
+function isErrorWithMessage<T>(value: T): value is T & { message: string } {
+  if (typeof value !== "object" || value === null) return false;
+
+  // SAFETY: `value` was just proved to be a non-null object; reading its
+  // optional `message` field can only yield `undefined | unknown`, never throw.
+  return isString((value as { message?: unknown }).message);
+}
+
+/**
+ * Type predicate: `value` is a non-null object with a `statusText` field
+ * that is a string (e.g. a thrown `{ statusText: "..." }` or a `Response`).
+ */
+function isErrorWithStatusText<T>(
+  value: T,
+): value is T & { statusText: string } {
+  if (typeof value !== "object" || value === null) return false;
+
+  // SAFETY: `value` was just proved to be a non-null object; reading its
+  // optional `statusText` field can only yield `undefined | unknown`, never throw.
+  return isString((value as { statusText?: unknown }).statusText);
+}
+
 async function errorDetail(res: Response): Promise<string> {
   try {
-    const body = (await res.json()) as { detail?: unknown };
-    if (typeof body.detail === "string") return body.detail;
-    if (Array.isArray(body.detail)) return "Invalid request parameters";
+    const body: unknown = await res.json();
+
+    if (isApiErrorBody(body)) {
+      const { detail } = body;
+
+      if (isString(detail)) return detail;
+
+      if (detail !== undefined) return "Invalid request parameters";
+    }
   } catch {
     // non-JSON error body
   }
+
   return res.statusText || "Request failed";
 }
 
 const fetcher = async <T,>(url: string): Promise<T> => {
   const res = await fetch(url);
+
   if (!res.ok) {
     throw new ApiError(`${res.status}: ${await errorDetail(res)}`, res.status);
   }
+
+  // SAFETY: T is the caller's contract for this URL. Every `useSWR<T>(url, fetcher)`
+  // call site establishes the URL→T pairing; this assertion hands the parsed JSON
+  // to that contract without narrowing a body of unknown shape.
   return (await res.json()) as T;
 };
 
@@ -87,15 +154,20 @@ export function modelPath(modelId: string): string {
 }
 
 export const STREAK_MIN = 1;
+
 export const STREAK_MAX = 120;
 
 export function clampStreak(n: number): number {
   if (!Number.isFinite(n)) return STREAK_MIN;
+
   return Math.min(STREAK_MAX, Math.max(STREAK_MIN, Math.trunc(n)));
 }
 
-/** Account endpoints return 404 when the web proxy does not expose them. */
-export function isNotExposed(error: unknown): boolean {
+/**
+ * Account endpoints return 404 when the web proxy does not expose them. The
+ * type predicate lets callers narrow the unknown SWR error to `ApiError`.
+ */
+export function isNotExposed(error: unknown): error is ApiError {
   return error instanceof ApiError && error.status === 404;
 }
 
@@ -142,14 +214,19 @@ export function useComparison(
   kiloAnnual: boolean = false,
 ) {
   let url: string | null = null;
+
   if (modelId) {
     const params = new URLSearchParams({ kilo_annual: String(kiloAnnual) });
+
     if (kiloTier) params.set("kilo_tier", kiloTier);
+
     if (kiloStreakMonths != null) {
       params.set("kilo_streak_months", String(clampStreak(kiloStreakMonths)));
     }
+
     url = `/api/compare/${modelPath(modelId)}?${params}`;
   }
+
   return useSWR<ModelComparison>(url, fetcher, defaultConfig);
 }
 
@@ -159,6 +236,7 @@ export function useKiloPlans() {
 
 export function useHistory(modelId: string | null, days: number = 30) {
   const url = modelId ? `/api/models/${modelPath(modelId)}/history?days=${days}` : null;
+
   return useSWR<ModelPricing[]>(url, fetcher, defaultConfig);
 }
 
@@ -251,29 +329,38 @@ export function useActivity() {
 
 export function fmtUsd(n: number): string {
   if (!Number.isFinite(n)) return "—";
+
   if (n === 0) return "$0";
   const sign = n < 0 ? "-" : "";
   const abs = Math.abs(n);
+
   if (abs < 0.01) return `${sign}$${abs.toFixed(4)}`;
+
   if (abs < 1) return `${sign}$${abs.toFixed(3)}`;
+
   return `${sign}$${abs.toFixed(2)}`;
 }
 
 export function fmtSpeed(n: number | null | undefined): string {
   if (n == null || !Number.isFinite(n)) return "—";
+
   return `${Math.round(n)} tok/s`;
 }
 
 export function fmtLatency(ms: number | null | undefined): string {
   if (ms == null || !Number.isFinite(ms)) return "—";
+
   return ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${Math.round(ms)}ms`;
 }
 
 // Compact context-window formatter (1k / 1M suffix).
 export function fmtCtx(tokens: number | null | undefined): string {
   if (tokens == null) return "—";
+
   if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(0)}M`;
+
   if (tokens >= 1_000) return `${(tokens / 1_000).toFixed(0)}k`;
+
   return String(tokens);
 }
 
@@ -282,15 +369,29 @@ export function fmtCtx(tokens: number | null | undefined): string {
 // thrown value is an Error, a string, or an arbitrary object. Deliberately
 // avoids JSON.stringify on raw objects so React internals (digest, stack,
 // componentStack) never leak into user-visible red text.
-export function errMsg(error: unknown): string {
+//
+// `ThrownValue` is the named domain for the helper: any value SWR or a
+// thrown promise can surface. The object shape claims optional `string`
+// fields, which `isErrorMessageCarrier` validates at the I/O boundary so
+// we never pass an arbitrary non-string to the formatter.
+export type ThrownValue =
+  | Error
+  | string
+  | { message?: string; statusText?: string }
+  | null
+  | undefined;
+
+export function errMsg(error: ThrownValue): string {
   if (error == null) return "Unknown error";
-  if (typeof error === "string") return error || "Request failed";
+
+  if (isString(error)) return error || "Request failed";
+
   if (error instanceof Error) return error.message;
-  if (typeof error === "object") {
-    const e = error as { message?: unknown; statusText?: unknown };
-    if (typeof e.message === "string") return e.message;
-    if (typeof e.statusText === "string") return e.statusText;
-  }
+
+  if (isErrorWithMessage(error)) return error.message;
+
+  if (isErrorWithStatusText(error)) return error.statusText;
+
   return "Request failed";
 }
 
@@ -302,6 +403,7 @@ export function errMsg(error: unknown): string {
 const MODEL_SPEED_BASE = "https://model-speed.andrea-house.com";
 
 export type Gateway = "openrouter" | "kilo";
+
 export type ProbeStatus = "ok" | "throttled" | "timeout" | "error";
 
 export interface SpeedProbeResult {

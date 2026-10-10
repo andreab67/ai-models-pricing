@@ -41,6 +41,7 @@ function accountsExposed(): boolean {
 
 function isAllowed(path: string): boolean {
   if (PUBLIC_ROUTES.some((re) => re.test(path))) return true;
+
   return accountsExposed() && ACCOUNT_ROUTES.some((re) => re.test(path));
 }
 
@@ -64,6 +65,7 @@ export async function GET(
   }
 
   const path = segments.join("/");
+
   if (!isAllowed(path)) return notFound();
 
   const base = (process.env.API_BASE_URL || "http://localhost:8000").replace(/\/+$/, "");
@@ -73,6 +75,7 @@ export async function GET(
   });
 
   let res: Response;
+
   try {
     res = await fetch(upstream, {
       method: "GET",
@@ -82,6 +85,7 @@ export async function GET(
     });
   } catch (err) {
     const timedOut = err instanceof Error && err.name === "TimeoutError";
+
     return NextResponse.json(
       { detail: timedOut ? "Upstream timeout" : "Upstream unavailable" },
       { status: timedOut ? 504 : 502 },
@@ -90,9 +94,11 @@ export async function GET(
 
   const headers = new Headers();
   const contentType = res.headers.get("content-type");
+
   if (contentType) headers.set("content-type", contentType);
   // Public catalog data may be cached briefly; account data and errors never.
   const isAccount = ACCOUNT_ROUTES.some((re) => re.test(path));
   headers.set("cache-control", res.ok && !isAccount ? "public, max-age=60" : "no-store");
+
   return new Response(res.body, { status: res.status, headers });
 }
