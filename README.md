@@ -159,7 +159,7 @@ API_BASE_URL=http://localhost:8000 npm run dev
 ### Account Activity
 
 - `GET /accounts/usage` — spend + balance (OpenAI, Anthropic)
-- `GET /accounts/activity?period=today|7d|30d&group_by=model|api_key|app` — OpenRouter usage in `America/Denver` local time (default `today`, window ends now so the current day is partial), reported as OpenRouter credit charges, upstream BYOK usage and combined usage. Needs `OPENROUTER_ADMIN_KEY`. Cached per period and grouping (5 min for today, 15 min otherwise). These are usage estimates, not metered charges or provider credit balances (for example the $100/month Claude Max 5x API credit applies to Anthropic API usage on one linked Console org, never to OpenAI embeddings)
+- `GET /accounts/activity?period=today|7d|30d&group_by=model|api_key|app` — OpenRouter usage in `America/Denver` local time (default `today`, window ends now so the current day is partial), reported as OpenRouter credit charges, upstream BYOK usage and combined usage. Needs `OPENROUTER_ADMIN_KEY`. Cached per period and grouping (5 min for today, 15 min otherwise). Credit charges are what OpenRouter metered against your credits; BYOK usage is OpenRouter's record of upstream cost that the provider bills separately, and provider credits may cover it (for example the $100/month Claude Max 5x API credit applies to Anthropic API usage on one linked Console org, never to OpenAI embeddings)
 - `GET /accounts/openai-activity` — OpenAI costs by model
 
 See `FUNCTIONAL.md` for complete endpoint documentation and response schemas.
