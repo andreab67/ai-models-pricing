@@ -24,8 +24,10 @@ def channels_for(
     kilo_streak_months: int = 8,
     kilo_annual: bool = False,
 ) -> list[WrapperCost]:
-    """All four channels for a given model + Kilo assumptions."""
+    """All channels (OR PAYG/BYOK, Kilo) for a given model + Kilo assumptions."""
     discount = effective_discount(kilo_tier, kilo_streak_months, annual=kilo_annual)
+    allowance = _settings.openrouter_byok_free_allowance_usd
+    fee_pct = _settings.openrouter_byok_fee_pct * 100
     return [
         WrapperCost(
             channel="openrouter_payg",
@@ -39,13 +41,27 @@ def channels_for(
         ),
         WrapperCost(
             channel="openrouter_byok",
+            prompt_usd_per_mtok=model.prompt_usd_per_mtok,
+            completion_usd_per_mtok=model.completion_usd_per_mtok,
+            notes=(
+                f"No OpenRouter fee within the first ${allowance:,.0f}/mo of list-price "
+                f"BYOK inference; {fee_pct:g}% of list price after (charged to OpenRouter "
+                "credits). Estimate; inference is billed by the upstream provider."
+            ),
+        ),
+        WrapperCost(
+            channel="openrouter_byok_over_allowance",
             prompt_usd_per_mtok=_apply_markup(
                 model.prompt_usd_per_mtok, _settings.openrouter_byok_fee_pct
             ),
             completion_usd_per_mtok=_apply_markup(
                 model.completion_usd_per_mtok, _settings.openrouter_byok_fee_pct
             ),
-            notes=f"+{_settings.openrouter_byok_fee_pct*100:.1f}% past 1M reqs/mo",
+            notes=(
+                f"Past the ${allowance:,.0f}/mo BYOK allowance: +{fee_pct:g}% of list price "
+                "(charged to OpenRouter credits). Estimate; inference is billed by the "
+                "upstream provider."
+            ),
         ),
         WrapperCost(
             channel="kilo_pass",

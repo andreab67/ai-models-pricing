@@ -1,12 +1,20 @@
 "use client";
 
+import { useState } from "react";
+
 import {
+  ActivityContractError,
   errMsg,
+  fmtCount,
+  fmtUsd,
+  fmtUsdOrDash,
   isNotExposed,
   useAccountUsage,
   useActivity,
-  fmtUsd,
   type AccountProviderUsage,
+  type ActivityGroupBy,
+  type ActivityPeriod,
+  type ActivityPeriodKey,
 } from "@/lib/api";
 
 // ---------------------------------------------------------------------------
@@ -290,32 +298,136 @@ function ProviderCard({
 // table from /api/accounts/activity (admin key required for non-empty rows).
 // ---------------------------------------------------------------------------
 
-function OpenRouterActivityTable() {
-  const { data: activityData, error: activityError } = useActivity();
+const PERIOD_OPTIONS: { key: ActivityPeriodKey; label: string }[] = [
+  { key: "today", label: "Today" },
+  { key: "7d", label: "7 days" },
+  { key: "30d", label: "30 days" },
+];
 
-  const totalSpend =
-    activityData?.items.reduce((s, i) => s + i.cost_usd, 0) ?? null;
+const GROUP_OPTIONS: { key: ActivityGroupBy; label: string }[] = [
+  { key: "model", label: "Model" },
+  { key: "api_key", label: "Key" },
+  { key: "app", label: "App" },
+];
+
+interface ToggleProps<K extends string> {
+  label: string;
+  options: { key: K; label: string }[];
+  value: K;
+  onChange: (key: K) => void;
+}
+
+function Toggle<K extends string>({ label, options, value, onChange }: ToggleProps<K>) {
+  return (
+    <div className="flex gap-1" role="group" aria-label={label}>
+      {options.map((o) => {
+        const active = o.key === value;
+
+        return (
+          <button
+            key={o.key}
+            type="button"
+            onClick={() => onChange(o.key)}
+            aria-pressed={active}
+            className={`rounded px-2 py-0.5 text-xs font-medium transition-colors ${
+              active ? "bg-blue-600 text-white" : "bg-border text-fg/80 hover:bg-border/70"
+            }`}
+          >
+            {o.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+// "YYYY-MM-DD" -> "Oct 14". Split instead of new Date(str): that parses as UTC
+// midnight and can render the previous day in a western timezone.
+function fmtCalendarDate(ymd: string): string {
+  const [y, m, d] = ymd.split("-").map(Number);
+
+  if (!y || !m || !d) return ymd;
+
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    timeZone: "UTC",
+  }).format(new Date(Date.UTC(y, m - 1, d)));
+}
+
+function fmtPeriodLine(p: ActivityPeriod): string {
+  const end = fmtCalendarDate(p.end_date);
+
+  if (p.key === "today") {
+    return [`Today, ${end}`, p.partial ? "partial" : null, p.timezone]
+      .filter((x) => x !== null)
+      .join(" · ");
+  }
+
+  const range = `${fmtCalendarDate(p.start_date)} – ${end}`;
+
+  return [range, p.partial ? "today partial" : null, p.timezone]
+    .filter((x) => x !== null)
+    .join(" · ");
+}
+
+function fmtFetchedAt(iso: string, timeZone: string): string | null {
+  const d = new Date(iso);
+
+  if (Number.isNaN(d.getTime())) return null;
+
+  try {
+    return new Intl.DateTimeFormat("en-US", {
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+      timeZone,
+    }).format(d);
+  } catch {
+    // unknown timezone name from the API: omit the time rather than guess one
+    return null;
+  }
+}
+
+function OpenRouterActivityTable() {
+  const [period, setPeriod] = useState<ActivityPeriodKey>("today");
+  const [groupBy, setGroupBy] = useState<ActivityGroupBy>("model");
+  const { data, error } = useActivity(period, groupBy);
+
+  const hasCaller = groupBy !== "model";
+  const callerLabel = groupBy === "api_key" ? "Key" : "App";
+  const lowerBound = data?.status === "incomplete" ? "≥ " : "";
+  const usd = (n: number | null) => (n === null ? "—" : `${lowerBound}${fmtUsd(n)}`);
+  const fetchedAt = data ? fmtFetchedAt(data.fetched_at, data.period.timezone) : null;
 
   return (
     <div className="pt-2 border-t border-border space-y-2">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <span className="text-xs font-semibold uppercase tracking-wider text-muted">
-          OpenRouter Models Used
+          OpenRouter usage
         </span>
-        {totalSpend != null && (
-          <span className="text-xs font-mono text-muted">{fmtUsd(totalSpend)}</span>
-        )}
+        <div className="flex flex-wrap items-center gap-2">
+          <Toggle label="Period" options={PERIOD_OPTIONS} value={period} onChange={setPeriod} />
+          <Toggle label="Group by" options={GROUP_OPTIONS} value={groupBy} onChange={setGroupBy} />
+        </div>
       </div>
 
-      {activityError && (
-        <p className="text-xs text-red-400">
-          Activity: {errMsg(activityError)}
+      {error instanceof ActivityContractError && (
+        <p className="text-xs text-red-400">Activity: unexpected response from API</p>
+      )}
+      {error && !(error instanceof ActivityContractError) && (
+        <p className="text-xs text-red-400">Activity: {errMsg(error)}</p>
+      )}
+      {!data && !error && <p className="text-xs text-muted">Loading…</p>}
+
+      {data && (
+        <p className="text-xs text-muted">
+          {fmtPeriodLine(data.period)}
+          {fetchedAt !== null && ` · fetched ${fetchedAt}`}
         </p>
       )}
-      {!activityData && !activityError && (
-        <p className="text-xs text-muted">Loading…</p>
-      )}
-      {activityData && activityData.items.length === 0 && (
+
+      {data?.status === "unconfigured" && (
         <p className="text-xs text-muted/60">
           Requires OpenRouter management key —{" "}
           <a
@@ -329,40 +441,76 @@ function OpenRouterActivityTable() {
           and set OPENROUTER_ADMIN_KEY in cluster secret
         </p>
       )}
-      {activityData && activityData.items.length > 0 && (
-        <table className="w-full text-xs">
-          <thead>
-            <tr className="text-muted border-b border-border">
-              <th className="text-left font-normal pb-1.5">Model</th>
-              <th className="text-right font-normal pb-1.5">Requests</th>
-              <th className="text-right font-normal pb-1.5">In tok</th>
-              <th className="text-right font-normal pb-1.5">Out tok</th>
-              <th className="text-right font-normal pb-1.5">Spend</th>
-            </tr>
-          </thead>
-          <tbody>
-            {activityData.items.map((item) => (
-              <tr
-                key={item.model_id}
-                className="border-b border-border/40 last:border-0"
-              >
-                <td className="py-1.5 font-mono text-fg/80">{item.model_id}</td>
-                <td className="py-1.5 text-right font-mono">
-                  {item.requests.toLocaleString()}
-                </td>
-                <td className="py-1.5 text-right font-mono">
-                  {item.prompt_tokens.toLocaleString()}
-                </td>
-                <td className="py-1.5 text-right font-mono">
-                  {item.completion_tokens.toLocaleString()}
-                </td>
-                <td className="py-1.5 text-right font-mono">
-                  {fmtUsd(item.cost_usd)}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      {data?.status === "error" && (
+        <p className="text-xs text-red-400">Activity: {data.error ?? "unknown error"}</p>
+      )}
+      {data?.warnings.map((w) => (
+        <p key={w} className="text-xs text-yellow-400">
+          {w}
+        </p>
+      ))}
+
+      {data && (data.status === "complete" || data.status === "incomplete") && (
+        <>
+          <dl className="grid grid-cols-[1fr_auto] gap-x-4 gap-y-0.5 text-xs">
+            <dt className="text-muted">OpenRouter credit charges</dt>
+            <dd className="text-right font-mono">{usd(data.totals.credits_usd)}</dd>
+            <dt className="text-muted">Upstream BYOK usage</dt>
+            <dd className="text-right font-mono">{usd(data.totals.byok_usd)}</dd>
+            <dt className="text-muted">Combined usage</dt>
+            <dd className="text-right font-mono">{usd(data.totals.combined_usd)}</dd>
+          </dl>
+
+          {data.items.length === 0 && data.status === "complete" && (
+            <p className="text-xs text-muted/60">No OpenRouter usage in this period.</p>
+          )}
+          {data.items.length > 0 && (
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="text-muted border-b border-border">
+                  <th className="text-left font-normal pb-1.5">Model</th>
+                  {hasCaller && <th className="text-left font-normal pb-1.5">{callerLabel}</th>}
+                  <th className="text-right font-normal pb-1.5">Requests</th>
+                  <th className="text-right font-normal pb-1.5">In tok</th>
+                  <th className="text-right font-normal pb-1.5">Out tok</th>
+                  <th className="text-right font-normal pb-1.5">Credits</th>
+                  <th className="text-right font-normal pb-1.5">BYOK</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.items.map((item, index) => (
+                  <tr
+                    key={`${item.model_id}\u0000${item.caller ?? ""}\u0000${index}`}
+                    className="border-b border-border/40 last:border-0"
+                  >
+                    <td className="py-1.5 font-mono text-fg/80">{item.model_id}</td>
+                    {hasCaller && (
+                      <td
+                        className="py-1.5 text-fg/80"
+                        title={!item.caller ? "No key/app reported by OpenRouter" : undefined}
+                      >
+                        {item.caller || "—"}
+                      </td>
+                    )}
+                    <td className="py-1.5 text-right font-mono">{fmtCount(item.requests)}</td>
+                    <td className="py-1.5 text-right font-mono">{fmtCount(item.prompt_tokens)}</td>
+                    <td className="py-1.5 text-right font-mono">
+                      {fmtCount(item.completion_tokens)}
+                    </td>
+                    <td className="py-1.5 text-right font-mono">{fmtUsdOrDash(item.credits_usd)}</td>
+                    <td className="py-1.5 text-right font-mono">{fmtUsdOrDash(item.byok_usd)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+          <p className="text-[10px] text-muted/60">
+            BYOK usage is billed by the upstream provider, not OpenRouter, and provider credits
+            may cover it (e.g. the Claude Max 5x $100/mo API credit on the linked Anthropic
+            Console org covers eligible Anthropic API usage; it does not cover OpenAI
+            embeddings). BYOK fees, when charged, are already included in credit charges.
+          </p>
+        </>
       )}
     </div>
   );

@@ -47,7 +47,8 @@ class Settings(BaseSettings):
     kilo_base_url: str = Field(default="https://api.kilo.ai/api/gateway")
     kilo_pricing_url: str = Field(default="https://kilo.ai/pricing")
     kilo_diff_user_agent: str = Field(default="model-pricing-bot/0.1 (+andrea-house.com)")
-    kilo_extraction_model: str = Field(default="anthropic/claude-haiku-4.5")
+    # OpenRouter slug. The native Anthropic id (claude-haiku-5-5) is not valid here.
+    kilo_extraction_model: str = Field(default="anthropic/claude-haiku-5.5")
     kilo_sanity_max_delta_pct: float = Field(default=0.50)
 
     # --- gitlab (kilo_diff auto-commit) ------------------------------------
@@ -107,7 +108,10 @@ class Settings(BaseSettings):
 
     # --- comparison wrappers ---------------------------------------------
     openrouter_payg_fee_pct: float = Field(default=0.055)
+    # BYOK: the first openrouter_byok_free_allowance_usd per month of list-price
+    # BYOK inference carries no OpenRouter fee; past it the fee below applies.
     openrouter_byok_fee_pct: float = Field(default=0.05)
+    openrouter_byok_free_allowance_usd: float = Field(default=25000.0)
 
     @field_validator("kilo_tier", mode="before")
     @classmethod

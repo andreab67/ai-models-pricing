@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import json
 
+import httpx
 import pytest
+import respx
 import yaml
 
 from app.schemas import KiloExtractedPricing, KiloPricePrimitives
@@ -221,3 +223,72 @@ def test_build_request_payload_uses_configured_model_and_json_mode() -> None:
     assert payload["response_format"] == {"type": "json_object"}
     assert payload["messages"][1]["content"] == "some page text"
     assert payload["model"]  # configured default, non-empty
+
+
+def test_payload_has_no_sampling_parameters_and_uses_the_openrouter_slug() -> None:
+    # Haiku 5.5 rejects non-default sampling and OpenRouter lists none as supported.
+    payload = kilo_extract._build_request_payload("page")
+    assert not {"temperature", "top_p", "top_k"} & payload.keys()
+    assert payload["model"] == "anthropic/claude-haiku-5.5"
+    assert "/" in payload["model"]
+    assert "." in payload["model"]
+    assert payload["model"] != "claude-haiku-5-5"
+
+
+def test_parse_primitives_ignores_reasoning_alongside_content() -> None:
+    raw = {
+        "choices": [
+            {
+                "finish_reason": "stop",
+                "message": {
+                    "content": json.dumps(_LIVE_PRIMITIVES),
+                    "reasoning": "The page lists three tiers...",
+                },
+            }
+        ]
+    }
+    assert isinstance(kilo_extract._parse_primitives(raw), KiloPricePrimitives)
+
+
+@pytest.mark.parametrize("content", [None, "", "   ", ["not", "a", "str"]])
+def test_parse_primitives_names_finish_reason_when_content_is_unusable(content: object) -> None:
+    # Thinking is on by default and can use the whole token budget, leaving no answer.
+    raw = {
+        "choices": [
+            {
+                "finish_reason": "length",
+                "message": {"content": content, "reasoning": "still thinking..."},
+            }
+        ]
+    }
+    with pytest.raises(ValueError, match="finish_reason='length'"):
+        kilo_extract._parse_primitives(raw)
+
+
+async def test_empty_extraction_response_is_a_manual_review_not_a_commit(
+    monkeypatch: pytest.MonkeyPatch, respx_mock: respx.MockRouter
+) -> None:
+    from app.jobs import kilo_diff
+
+    respx_mock.post(f"{kilo_extract._settings.openrouter_base_url}/chat/completions").mock(
+        return_value=httpx.Response(
+            200, json={"choices": [{"finish_reason": "length", "message": {"content": None}}]}
+        )
+    )
+    emails: list[str] = []
+    commits: list[str] = []
+
+    async def _email(old_hash: str, new_hash: str, reason: str) -> None:
+        emails.append(reason)
+
+    async def _commit(path: str, content: str, message: str) -> str:
+        commits.append(path)
+        return "url"
+
+    monkeypatch.setattr(kilo_diff, "_send_manual_review_email", _email)
+    monkeypatch.setattr(kilo_diff, "commit_file", _commit)
+
+    assert await kilo_diff._handle_change("old", "new", "page text") is None
+    assert commits == []
+    assert len(emails) == 1
+    assert "finish_reason='length'" in emails[0]

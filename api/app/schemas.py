@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -40,7 +40,13 @@ class ModelPricing(BaseModel):
 class WrapperCost(BaseModel):
     """Effective per-Mtok cost through a given channel."""
 
-    channel: Literal["openrouter_payg", "openrouter_byok", "kilo_pass", "kilo_byok"]
+    channel: Literal[
+        "openrouter_payg",
+        "openrouter_byok",
+        "openrouter_byok_over_allowance",
+        "kilo_pass",
+        "kilo_byok",
+    ]
     prompt_usd_per_mtok: float
     completion_usd_per_mtok: float
     notes: str | None = None
@@ -207,16 +213,64 @@ class AccountsUsage(BaseModel):
     fetched_at: datetime
 
 
+ActivityPeriodKey = Literal["today", "7d", "30d"]
+ActivityGroupBy = Literal["model", "api_key", "app"]
+
+
+class ActivityPeriod(BaseModel):
+    """The window actually queried, so the UI never has to guess what it is showing."""
+
+    key: ActivityPeriodKey
+    timezone: str = Field(..., description="IANA zone whose local midnights bound the window")
+    start: datetime = Field(..., description="UTC instant sent as time_range.start")
+    end: datetime = Field(..., description="UTC instant sent as time_range.end")
+    start_date: date = Field(..., description="Local calendar date of start")
+    end_date: date = Field(..., description="Local calendar date of end")
+    partial: bool = Field(..., description="True when end is 'now' (current local day incomplete)")
+
+
 class ModelActivityItem(BaseModel):
     model_id: str
-    requests: int
-    prompt_tokens: int
-    completion_tokens: int
-    cost_usd: float
+    caller: str | None = Field(
+        default=None,
+        description="api_key or app label for the chosen grouping; None = provider reported none",
+    )
+    requests: int | None = None
+    prompt_tokens: int | None = None
+    completion_tokens: int | None = None
+    reasoning_tokens: int | None = None
+    credits_usd: float | None = Field(
+        default=None,
+        description="credits_usage: billed to OpenRouter credits (includes BYOK fees)",
+    )
+    byok_usd: float | None = Field(
+        default=None,
+        description="byok_usage: upstream BYOK inference, billed by the upstream provider",
+    )
+    total_usd: float | None = Field(
+        default=None, description="total_usage = credits + byok (combined usage)"
+    )
+
+
+class ActivityTotals(BaseModel):
+    """Sums over the values present; None when no row had the value."""
+
+    credits_usd: float | None = None
+    byok_usd: float | None = None
+    combined_usd: float | None = None
 
 
 class ActivityResponse(BaseModel):
+    period: ActivityPeriod
+    group_by: ActivityGroupBy
+    status: Literal["complete", "incomplete", "unconfigured", "error"]
     items: list[ModelActivityItem]
+    totals: ActivityTotals
+    truncated: bool | None = Field(
+        default=None, description="Provider metadata.truncated; None = provider did not say"
+    )
+    warnings: list[str] = Field(default_factory=list)
+    error: str | None = None
     fetched_at: datetime
 
 

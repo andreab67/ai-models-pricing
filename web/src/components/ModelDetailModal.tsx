@@ -16,9 +16,11 @@ import {
 import { PriceHistoryChart } from "@/components/PriceHistoryChart";
 import {
   errMsg,
+  fmtCount,
   fmtLatency,
   fmtSpeed,
   fmtUsd,
+  fmtUsdOrDash,
   type Channel,
   useActivity,
   useComparison,
@@ -28,7 +30,8 @@ import { CHART_BLUE, CHART_GREEN } from "@/lib/chartColors";
 
 const CHANNEL_LABEL = {
   openrouter_payg: "OpenRouter PAYG",
-  openrouter_byok: "OpenRouter BYOK",
+  openrouter_byok: "OpenRouter BYOK (within free allowance)",
+  openrouter_byok_over_allowance: "OpenRouter BYOK (past free allowance)",
   kilo_pass: "Kilo Pass",
   kilo_byok: "Kilo BYOK",
 } satisfies Record<Channel, string>;
@@ -61,7 +64,7 @@ export function ModelDetailModal({
   );
 
   const { data: history } = useHistory(modelId, 30);
-  const { data: activity } = useActivity();
+  const { data: activity } = useActivity("30d", "model");
   const myUsage = activity?.items.find((i) => i.model_id === modelId);
 
   // Focus close button when modal opens; restore focus on close
@@ -188,11 +191,12 @@ export function ModelDetailModal({
                 <h3 className="mt-4 mb-2 text-sm font-semibold uppercase opacity-70">
                   Your usage (last 30 days)
                 </h3>
-                <div className="grid grid-cols-2 gap-2 text-sm md:grid-cols-4">
-                  <Meta label="Spent" value={fmtUsd(myUsage.cost_usd)} />
-                  <Meta label="Requests" value={myUsage.requests.toLocaleString()} />
-                  <Meta label="In tokens" value={`${(myUsage.prompt_tokens / 1000).toFixed(1)}k`} />
-                  <Meta label="Out tokens" value={`${(myUsage.completion_tokens / 1000).toFixed(1)}k`} />
+                <div className="grid grid-cols-2 gap-2 text-sm md:grid-cols-5">
+                  <Meta label="Credit charges" value={fmtUsdOrDash(myUsage.credits_usd)} />
+                  <Meta label="Upstream BYOK" value={fmtUsdOrDash(myUsage.byok_usd)} />
+                  <Meta label="Requests" value={fmtCount(myUsage.requests)} />
+                  <Meta label="In tokens" value={fmtKTokens(myUsage.prompt_tokens)} />
+                  <Meta label="Out tokens" value={fmtKTokens(myUsage.completion_tokens)} />
                 </div>
               </>
             )}
@@ -264,6 +268,10 @@ export function ModelDetailModal({
       </div>
     </div>
   );
+}
+
+function fmtKTokens(n: number | null): string {
+  return n === null ? "—" : `${(n / 1000).toFixed(1)}k`;
 }
 
 function Meta({ label, value }: { label: string; value: string }) {

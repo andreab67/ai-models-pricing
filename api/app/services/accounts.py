@@ -11,10 +11,12 @@ from __future__ import annotations
 
 import asyncio
 import math
-from datetime import UTC, datetime
-from typing import Any
+from datetime import UTC, datetime, time, timedelta
+from typing import Any, Literal
+from zoneinfo import ZoneInfo
 
 import httpx
+from pydantic import ValidationError
 
 from app.config import get_settings
 from app.logging import get_logger
@@ -22,7 +24,11 @@ from app.schemas import (
     AccountBalance,
     AccountProviderUsage,
     AccountsUsage,
+    ActivityGroupBy,
+    ActivityPeriod,
+    ActivityPeriodKey,
     ActivityResponse,
+    ActivityTotals,
     ModelActivityItem,
     QuotaWindow,
 )
@@ -581,8 +587,37 @@ _check_openai  # noqa: B018
 _check_alibaba  # noqa: B018
 
 
-_ACTIVITY_CACHE_KEY = "accounts:activity"
+_ACTIVITY_URL = "https://openrouter.ai/api/v1/analytics/query"
 _ACTIVITY_CACHE_TTL = 900  # 15 min
+_ACTIVITY_TODAY_CACHE_TTL = 300  # 5 min -- "today" is the number people watch move
+_ACTIVITY_TZ = "America/Denver"
+_ACTIVITY_DAYS: dict[str, int] = {"today": 1, "7d": 7, "30d": 30}
+_ACTIVITY_LIMIT = 1000
+# byok_fees is deliberately absent: requesting it switches OpenRouter to a
+# different, lower-valued result set (see .audit/evidence-live.md s4), and
+# credits_usage already includes BYOK fees, so it is not needed for totals.
+_ACTIVITY_METRICS = [
+    "request_count",
+    "total_usage",
+    "credits_usage",
+    "byok_usage",
+    "tokens_prompt",
+    "tokens_completion",
+    "reasoning_tokens",
+]
+_ACTIVITY_DIMENSIONS: dict[str, list[str]] = {
+    "model": ["model"],
+    "api_key": ["model", "api_key_id"],
+    "app": ["model", "app"],
+}
+_ACTIVITY_CALLER_FIELD = {"model": None, "api_key": "api_key_id", "app": "app"}
+_RECONCILE_TOLERANCE = 1e-6
+_USD_DECIMALS = 6
+_BILLING_FIELDS = ("total_usage", "credits_usage", "byok_usage")
+
+
+class _ActivityError(Exception):
+    """A provider failure whose message is safe to show (no secrets)."""
 
 
 def _to_int(v: object) -> int:
@@ -594,70 +629,257 @@ def _to_int(v: object) -> int:
         return 0
 
 
-async def get_activity() -> ActivityResponse:
-    cached = await cache.get(_ACTIVITY_CACHE_KEY)
-    if cached:
-        return ActivityResponse.model_validate(cached)
+def _provider_time(moment: datetime) -> str:
+    """OpenRouter accepts only ``YYYY-MM-DDTHH:MM:SSZ`` (offsets and bare dates 400)."""
+    return moment.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
-    # Beta analytics query requires a management key; fall back to regular key.
-    # We use /analytics/query (not /activity) because /activity excludes the
-    # current UTC day until it closes -- analytics/query includes today, matching
-    # the OpenRouter dashboard exactly.
-    key = _settings.openrouter_admin_key or _settings.openrouter_api_key
-    if not key:
-        return ActivityResponse(items=[], fetched_at=datetime.now(UTC))
 
-    body = {
-        "metrics": ["request_count", "total_usage", "tokens_prompt", "tokens_completion"],
-        "dimensions": ["model"],
-        "order_by": {"field": "total_usage", "direction": "desc"},
-    }
+def activity_window(period: ActivityPeriodKey, now: datetime) -> ActivityPeriod:
+    """The queried window: local midnight (America/Denver) of the first day up to ``now``.
 
-    ok = False
-    async with httpx.AsyncClient(timeout=20.0) as client:
-        try:
+    The start is converted to UTC per date, so a DST change inside a multi-day
+    window moves the offset of the start only, never the end. The end is ``now``
+    truncated to whole seconds, hence the window is always partial.
+    """
+    if now.tzinfo is None:
+        raise ValueError("now must be timezone-aware")
+    zone = ZoneInfo(_ACTIVITY_TZ)
+    end = now.astimezone(UTC).replace(microsecond=0)
+    end_date = end.astimezone(zone).date()
+    start_date = end_date - timedelta(days=_ACTIVITY_DAYS[period] - 1)
+    start = datetime.combine(start_date, time.min, tzinfo=zone).astimezone(UTC)
+    if end <= start:  # now is exactly local midnight: never send a zero-length range
+        end = start + timedelta(seconds=1)
+    return ActivityPeriod(
+        key=period,
+        timezone=_ACTIVITY_TZ,
+        start=start,
+        end=end,
+        start_date=start_date,
+        end_date=end_date,
+        partial=True,
+    )
+
+
+def _opt_float(v: object) -> float | None:
+    """Finite float, or None for missing / non-numeric / non-finite (never 0.0)."""
+    if v is None or isinstance(v, bool):
+        return None
+    try:
+        n = float(v)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+    return n if math.isfinite(n) else None
+
+
+def _opt_count(v: object) -> int | None:
+    """Non-negative whole number (analytics sends counts as strings), else None."""
+    n = _opt_float(v)
+    if n is None or n < 0 or not n.is_integer():
+        return None
+    return int(n)
+
+
+def _parse_activity_row(
+    row: object, group_by: ActivityGroupBy
+) -> tuple[ModelActivityItem | None, bool, bool]:
+    """Parse one provider row -> (item, billing_missing, unreconciled).
+
+    ``item`` is None when the row is unusable (not an object, or no model id).
+    """
+    if not isinstance(row, dict):
+        return None, False, False
+    model_id = row.get("model")
+    if not isinstance(model_id, str) or not model_id:
+        return None, False, False
+
+    caller: str | None = None
+    caller_field = _ACTIVITY_CALLER_FIELD[group_by]
+    if caller_field is not None:
+        raw_caller = row.get(caller_field)
+        caller = None if raw_caller is None else str(raw_caller)
+
+    costs = {f: _opt_float(row.get(f)) for f in _BILLING_FIELDS}
+    credits, byok, total = (
+        costs["credits_usage"],
+        costs["byok_usage"],
+        costs["total_usage"],
+    )
+    unreconciled = (
+        credits is not None
+        and byok is not None
+        and total is not None
+        and abs(credits + byok - total) > _RECONCILE_TOLERANCE
+    )
+    item = ModelActivityItem(
+        model_id=model_id,
+        caller=caller,
+        requests=_opt_count(row.get("request_count")),
+        prompt_tokens=_opt_count(row.get("tokens_prompt")),
+        completion_tokens=_opt_count(row.get("tokens_completion")),
+        reasoning_tokens=_opt_count(row.get("reasoning_tokens")),
+        credits_usd=None if credits is None else round(credits, _USD_DECIMALS),
+        byok_usd=None if byok is None else round(byok, _USD_DECIMALS),
+        total_usd=None if total is None else round(total, _USD_DECIMALS),
+    )
+    return item, any(v is None for v in costs.values()), unreconciled
+
+
+def _sum_present(values: list[float | None]) -> float | None:
+    present = [v for v in values if v is not None]
+    return round(sum(present), _USD_DECIMALS) if present else None
+
+
+def _activity_response(
+    window: ActivityPeriod,
+    group_by: ActivityGroupBy,
+    *,
+    status: Literal["complete", "incomplete", "unconfigured", "error"],
+    items: list[ModelActivityItem] | None = None,
+    truncated: bool | None = None,
+    warnings: list[str] | None = None,
+    error: str | None = None,
+) -> ActivityResponse:
+    items = items or []
+    return ActivityResponse(
+        period=window,
+        group_by=group_by,
+        status=status,
+        items=items,
+        totals=ActivityTotals(
+            credits_usd=_sum_present([i.credits_usd for i in items]),
+            byok_usd=_sum_present([i.byok_usd for i in items]),
+            combined_usd=_sum_present([i.total_usd for i in items]),
+        ),
+        truncated=truncated,
+        warnings=warnings or [],
+        error=error,
+        fetched_at=datetime.now(UTC),
+    )
+
+
+async def _read_activity_cache(key: str, window: ActivityPeriod) -> ActivityResponse | None:
+    cached = await cache.get(key)
+    if not cached:
+        return None
+    try:
+        result = ActivityResponse.model_validate(cached)
+    except ValidationError:
+        # Pre-v2 payload (or garbage): refetch rather than serve a wrong shape.
+        log.warning("openrouter_activity_cache_ignored", key=key, reason="invalid shape")
+        return None
+    if result.period.start_date != window.start_date:
+        return None  # the local day rolled over since this was cached
+    return result
+
+
+async def _fetch_activity_rows(key: str, body: dict[str, Any]) -> tuple[list[Any], bool | None]:
+    """POST the analytics query -> (rows, truncated). Raises ``_ActivityError``."""
+    try:
+        async with httpx.AsyncClient(timeout=20.0) as client:
             resp = await client.post(
-                "https://openrouter.ai/api/v1/analytics/query",
-                headers={
-                    "Authorization": f"Bearer {key}",
-                    "Content-Type": "application/json",
-                },
+                _ACTIVITY_URL,
+                headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
                 json=body,
             )
-            resp.raise_for_status()
-            # Shape: {"data": {"data": [{model, request_count, total_usage,
-            #   tokens_prompt, tokens_completion}, ...], "metadata": {...}}}
-            rows = (resp.json().get("data") or {}).get("data") or []
-            items = []
-            for r in rows:
-                if not isinstance(r, dict):
-                    continue
-                model_id = r.get("model")
-                if not isinstance(model_id, str):
-                    continue
-                items.append(
-                    ModelActivityItem(
-                        model_id=model_id,
-                        requests=_to_int(r.get("request_count")),
-                        prompt_tokens=_to_int(r.get("tokens_prompt")),
-                        completion_tokens=_to_int(r.get("tokens_completion")),
-                        # _num, not float(): one malformed or non-finite
-                        # total_usage must not blank the whole usage table.
-                        cost_usd=round(_num(r.get("total_usage")), 6),
-                    )
-                )
-            items.sort(key=lambda x: x.cost_usd, reverse=True)
-            result = ActivityResponse(items=items, fetched_at=datetime.now(UTC))
-            ok = True
-        except Exception as exc:
-            log.warning("openrouter_activity_failed", error=str(exc))
-            result = ActivityResponse(items=[], fetched_at=datetime.now(UTC))
+        if resp.status_code == 403:
+            raise _ActivityError("OpenRouter analytics needs a management key (HTTP 403)")
+        if resp.status_code >= 400:
+            raise _ActivityError(f"OpenRouter analytics request failed (HTTP {resp.status_code})")
+        payload = resp.json()
+    except httpx.HTTPError as exc:
+        raise _ActivityError(
+            f"OpenRouter analytics request failed ({type(exc).__name__})"
+        ) from exc
+    except ValueError as exc:  # json.JSONDecodeError and friends
+        raise _ActivityError("OpenRouter analytics returned invalid JSON") from exc
 
-    await cache.set(
-        _ACTIVITY_CACHE_KEY,
-        result.model_dump(mode="json"),
-        ttl=_ACTIVITY_CACHE_TTL if ok else _FAILURE_CACHE_TTL,
+    data = payload.get("data") if isinstance(payload, dict) else None
+    rows = data.get("data") if isinstance(data, dict) else None
+    if not isinstance(rows, list):
+        raise _ActivityError("OpenRouter analytics returned an unexpected response shape")
+    metadata = data.get("metadata") if isinstance(data, dict) else None
+    truncated = metadata.get("truncated") if isinstance(metadata, dict) else None
+    return rows, truncated if isinstance(truncated, bool) else None
+
+
+async def get_activity(
+    period: ActivityPeriodKey = "today",
+    group_by: ActivityGroupBy = "model",
+    *,
+    now: datetime | None = None,
+) -> ActivityResponse:
+    """OpenRouter usage for a local-time window, split into credits / BYOK / combined.
+
+    Uses ``/analytics/query`` (not ``/activity``, which excludes the current
+    UTC day). It needs a management key, so only OPENROUTER_ADMIN_KEY is used:
+    a regular key gets HTTP 403 there. The window is always sent as an explicit
+    ``time_range`` -- top-level start/end fields are silently ignored upstream.
+    """
+    window = activity_window(period, now or datetime.now(UTC))
+    key = _settings.openrouter_admin_key
+    if not key:
+        return _activity_response(window, group_by, status="unconfigured")
+
+    cache_key = f"accounts:activity:v2:{period}:{group_by}"
+    hit = await _read_activity_cache(cache_key, window)
+    if hit is not None:
+        return hit
+
+    body = {
+        "metrics": _ACTIVITY_METRICS,
+        "dimensions": _ACTIVITY_DIMENSIONS[group_by],
+        "time_range": {
+            "start": _provider_time(window.start),
+            "end": _provider_time(window.end),
+        },
+        "order_by": {"field": "total_usage", "direction": "desc"},
+        "limit": _ACTIVITY_LIMIT,
+    }
+    try:
+        rows, truncated = await _fetch_activity_rows(key, body)
+    except _ActivityError as exc:
+        log.warning("openrouter_activity_failed", error=str(exc))
+        failed = _activity_response(window, group_by, status="error", error=str(exc))
+        await cache.set(cache_key, failed.model_dump(mode="json"), ttl=_FAILURE_CACHE_TTL)
+        return failed
+
+    items: list[ModelActivityItem] = []
+    skipped = missing_billing = unreconciled = 0
+    for row in rows:
+        item, billing_missing, off_by_more_than_tolerance = _parse_activity_row(row, group_by)
+        if item is None:
+            skipped += 1
+            continue
+        items.append(item)
+        missing_billing += billing_missing
+        unreconciled += off_by_more_than_tolerance
+    items.sort(key=lambda i: (i.total_usd is None, -(i.total_usd or 0.0)))
+
+    warnings: list[str] = []
+    if skipped:
+        warnings.append(f"{skipped} malformed row(s) from OpenRouter were skipped")
+    if missing_billing:
+        warnings.append(f"{missing_billing} row(s) have a missing or non-numeric billing value")
+    if unreconciled:
+        warnings.append(f"{unreconciled} row(s) where credits + BYOK does not equal the total")
+    if truncated is True:
+        warnings.append(
+            f"OpenRouter truncated the results at {_ACTIVITY_LIMIT} rows; totals are partial"
+        )
+    elif truncated is None:
+        warnings.append("OpenRouter did not report whether results were truncated")
+
+    result = _activity_response(
+        window,
+        group_by,
+        status="incomplete" if warnings else "complete",
+        items=items,
+        truncated=truncated,
+        warnings=warnings,
     )
+    ttl = _ACTIVITY_TODAY_CACHE_TTL if period == "today" else _ACTIVITY_CACHE_TTL
+    await cache.set(cache_key, result.model_dump(mode="json"), ttl=ttl)
     return result
 
 
