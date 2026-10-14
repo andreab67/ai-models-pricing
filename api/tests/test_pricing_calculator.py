@@ -32,10 +32,35 @@ def test_openrouter_payg_adds_5_5_percent(sonnet: ModelPricing) -> None:
     assert payg.completion_usd_per_mtok == pytest.approx(15.0 * 1.055, rel=1e-3)
 
 
-def test_openrouter_byok_adds_5_percent(sonnet: ModelPricing) -> None:
+def test_openrouter_byok_within_allowance_is_list_price(sonnet: ModelPricing) -> None:
     channels = pricing_calculator.channels_for(sonnet)
     byok = next(c for c in channels if c.channel == "openrouter_byok")
-    assert byok.prompt_usd_per_mtok == pytest.approx(3.0 * 1.05, rel=1e-3)
+    assert byok.prompt_usd_per_mtok == sonnet.prompt_usd_per_mtok
+    assert byok.completion_usd_per_mtok == sonnet.completion_usd_per_mtok
+    assert byok.notes is not None
+    assert "$25,000" in byok.notes
+    assert "1M" not in byok.notes
+
+
+def test_openrouter_byok_over_allowance_adds_5_percent(sonnet: ModelPricing) -> None:
+    channels = pricing_calculator.channels_for(sonnet)
+    over = next(c for c in channels if c.channel == "openrouter_byok_over_allowance")
+    assert over.prompt_usd_per_mtok == pytest.approx(3.0 * 1.05, rel=1e-3)
+    assert over.completion_usd_per_mtok == pytest.approx(15.0 * 1.05, rel=1e-3)
+    assert over.notes is not None
+    assert "$25,000" in over.notes
+    assert "1M" not in over.notes
+
+
+def test_every_channel_is_listed_once(sonnet: ModelPricing) -> None:
+    names = [c.channel for c in pricing_calculator.channels_for(sonnet)]
+    assert names == [
+        "openrouter_payg",
+        "openrouter_byok",
+        "openrouter_byok_over_allowance",
+        "kilo_pass",
+        "kilo_byok",
+    ]
 
 
 def test_kilo_byok_is_passthrough(sonnet: ModelPricing) -> None:

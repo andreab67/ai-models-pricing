@@ -152,14 +152,14 @@ API_BASE_URL=http://localhost:8000 npm run dev
 
 ### Comparison
 
-- `GET /compare/{model_id}` — pricing across 4 channels
+- `GET /compare/{model_id}` — pricing across 5 channels
 - `GET /kilo/plans` — Kilo tier definitions
 - `GET /kilo/projection?tier=pro` — effective cost calculation
 
 ### Account Activity
 
 - `GET /accounts/usage` — spend + balance (OpenAI, Anthropic)
-- `GET /accounts/activity` — OpenRouter activity (last 30 days)
+- `GET /accounts/activity?period=today|7d|30d&group_by=model|api_key|app` — OpenRouter usage in `America/Denver` local time (default `today`, window ends now so the current day is partial), reported as OpenRouter credit charges, upstream BYOK usage and combined usage. Needs `OPENROUTER_ADMIN_KEY`. Cached per period and grouping (5 min for today, 15 min otherwise). These are usage estimates, not metered charges or provider credit balances (for example the $100/month Claude Max 5x API credit applies to Anthropic API usage on one linked Console org, never to OpenAI embeddings)
 - `GET /accounts/openai-activity` — OpenAI costs by model
 
 See `FUNCTIONAL.md` for complete endpoint documentation and response schemas.

@@ -68,9 +68,10 @@ Percentages are fractions (50% -> 0.50), not whole numbers.
 
 
 def _build_request_payload(page_text: str) -> dict[str, Any]:
+    # No sampling parameters: Haiku 5.5 rejects non-default temperature/top_p/top_k
+    # and OpenRouter lists none of them as supported for it.
     return {
         "model": _settings.kilo_extraction_model,
-        "temperature": 0,
         "response_format": {"type": "json_object"},
         "messages": [
             {"role": "system", "content": _SYSTEM_PROMPT},
@@ -80,7 +81,14 @@ def _build_request_payload(page_text: str) -> dict[str, Any]:
 
 
 def _parse_primitives(raw: dict[str, Any]) -> KiloPricePrimitives:
-    content = raw["choices"][0]["message"]["content"]
+    choice = raw["choices"][0]
+    content = choice["message"].get("content")
+    if not isinstance(content, str) or not content.strip():
+        # Thinking is on by default for Haiku 5.5 and can consume the whole
+        # token budget, leaving no answer; name why so the alert email is useful.
+        raise ValueError(
+            f"extraction response has no content (finish_reason={choice.get('finish_reason')!r})"
+        )
     data = json.loads(content)
     return KiloPricePrimitives.model_validate(data)
 

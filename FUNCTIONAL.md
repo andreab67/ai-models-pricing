@@ -2,7 +2,7 @@
 
 ## Overview
 
-The AI Model Pricing Dashboard tracks and compares Large Language Model (LLM) token costs. It reads the OpenRouter model catalog (models from OpenAI, Anthropic, Google, and many other vendors) and the Kilo AI Gateway catalog, normalizes prices to one metric (USD per 1M tokens), ranks models for coding workloads, and compares the effective cost of the same model across four purchasing channels.
+The AI Model Pricing Dashboard tracks and compares Large Language Model (LLM) token costs. It reads the OpenRouter model catalog (models from OpenAI, Anthropic, Google, and many other vendors) and the Kilo AI Gateway catalog, normalizes prices to one metric (USD per 1M tokens), ranks models for coding workloads, and compares the effective cost of the same model across five purchasing channels.
 
 ## Core Features
 
@@ -26,10 +26,11 @@ The AI Model Pricing Dashboard tracks and compares Large Language Model (LLM) to
 
 ### 3. Channel Comparison
 
-Compare the same model across four purchasing channels:
+Compare the same model across five purchasing channels:
 
 - **OpenRouter PAYG**: Pass-through price plus the credit-purchase fee (`OPENROUTER_PAYG_FEE_PCT`, default 5.5%)
-- **OpenRouter BYOK**: Bring-your-own-key price plus the BYOK fee (`OPENROUTER_BYOK_FEE_PCT`, default 5.0%)
+- **OpenRouter BYOK**: Bring-your-own-key at list price (+0%). OpenRouter charges no fee on the first $25,000/month of list-price BYOK inference (`OPENROUTER_BYOK_FREE_ALLOWANCE_USD`, default 25000)
+- **OpenRouter BYOK, past the allowance**: List price plus the BYOK fee (`OPENROUTER_BYOK_FEE_PCT`, default 5.0%), charged to OpenRouter credits. The app never infers whether the allowance is exhausted; both rows are estimates and the upstream provider bills the inference itself. Sources: https://openrouter.ai/docs/guides/overview/auth/byok and https://openrouter.ai/pricing
 - **Kilo Pass**: Kilo subscription credits with the tier's streak or annual bonus applied as an effective discount (tiers `starter`, `pro`, `expert`)
 - **Kilo BYOK**: True passthrough, no markup
 
@@ -46,8 +47,13 @@ Compare the same model across four purchasing channels:
 
 - **OpenRouter**: Credit balance (limit, spent, remaining) via `/credits`
 - **Kilo**: Key validation and available model count (the gateway has no spend or balance endpoint), plus the configured plan from `KILO_TIER`
-- **OpenRouter per-model usage**: Last 30 days from the beta `/analytics/query` endpoint, which includes the current UTC day. It uses `OPENROUTER_ADMIN_KEY` if set, else `OPENROUTER_API_KEY`. Malformed rows are skipped or zeroed individually, never allowed to blank the table
-- **Caching**: `/accounts/usage` is cached 2 minutes and `/accounts/activity` 15 minutes. Either is cached only 30 seconds when an upstream call failed
+- **OpenRouter usage**: From the beta `/analytics/query` endpoint, which includes the current UTC day. It needs a management key, so only `OPENROUTER_ADMIN_KEY` is used (a regular key gets HTTP 403); without it the status is `unconfigured` and no request is made
+  - **Windows**: `period=today` (default), `7d` or `30d`, in `America/Denver` local time. The start is local midnight of the first day converted to UTC per date (DST-correct); the end is "now", so the current day is always partial. The window is sent as an explicit `time_range` (`YYYY-MM-DDTHH:MM:SSZ`); OpenRouter silently ignores top-level `start`/`end` fields. Without a time range OpenRouter returns its default of the last 7 days
+  - **Grouping**: `group_by=model` (default), `api_key` or `app`; each row's `caller` is that key or app label (`null` when OpenRouter reports none)
+  - **Three amounts, never mixed**: `credits_usd` is billed to OpenRouter credits (it includes BYOK fees); `byok_usd` is upstream BYOK inference billed by the provider, not by OpenRouter; `total_usd` / `totals.combined_usd` is their sum ("combined usage"). `byok_fees` is not requested: it changes the result set, and it is already inside `credits_usage`
+  - **Honest gaps**: A malformed row is skipped and counted. A missing, non-numeric or non-finite value becomes `null`, never 0, and totals sum only the values present. `status` is `incomplete` (with `warnings`) when a row was skipped, a billing value was missing, credits + BYOK differs from the total by more than 1e-6, or results were truncated (or OpenRouter did not say). Failures give `status: error` with an `error` message; a missing key gives `unconfigured`
+  - **Not the same as your provider bill**: These figures are usage estimates from OpenRouter, not metered charges and not provider credit balances. For example, a Claude Max 5x plan includes a $100/month Claude API credit on one linked Anthropic Console organization (it expires monthly and does not cover Claude Code). It can cover Anthropic API usage billed to that organization, such as an Anthropic BYOK key from it, but never OpenAI embeddings. Source: https://platform.claude.com/docs/en/about-claude/api-credits-for-subscribers
+- **Caching**: `/accounts/usage` is cached 2 minutes. `/accounts/activity` is cached per `period` and `group_by` under `accounts:activity:v2:<period>:<group_by>`: 5 minutes for `today`, 15 minutes for `7d` and `30d`. An entry in the old shape, or from a previous local day, is ignored. Either endpoint is cached only 30 seconds when an upstream call failed; `unconfigured` is never cached
 - **Visibility**: The web proxy forwards `/accounts/*` only when `EXPOSE_ACCOUNT_DATA=true`. Otherwise the account panel and "your usage" figures are hidden
 
 ### 6. Historical Trend Analysis
@@ -119,7 +125,7 @@ Compare the same model across four purchasing channels:
 
 | Endpoint | Method | Query Parameters | Response | Purpose |
 |----------|--------|------------------|----------|---------|
-| `GET /compare/{model_id}` | GET | `kilo_tier`, `kilo_streak_months`, `kilo_annual=false` (all optional) | `ModelComparison` | Compare pricing across 4 channels |
+| `GET /compare/{model_id}` | GET | `kilo_tier`, `kilo_streak_months`, `kilo_annual=false` (all optional) | `ModelComparison` | Compare pricing across 5 channels |
 
 `kilo_tier` defaults to the configured `KILO_TIER`, and must be `starter`, `pro` or `expert` if given (anything else returns **422**). `kilo_streak_months` defaults to the steady-state streak, the month the bonus reaches its cap in `kilo_plans.yaml` (month 8 today). It must be 1–120 if given. The month-1 welcome bonus is one-off, so it is only used when asked for explicitly. The dashboard and All Models modals send neither value. Returns 404 if `model_id` is not in the catalog.
 
@@ -136,9 +142,15 @@ Compare the same model across four purchasing channels:
     },
     {
       "channel": "openrouter_byok",
+      "prompt_usd_per_mtok": 3.0,
+      "completion_usd_per_mtok": 15.0,
+      "notes": "No OpenRouter fee within the first $25,000/mo of list-price BYOK inference; 5% of list price after (charged to OpenRouter credits). Estimate; inference is billed by the upstream provider."
+    },
+    {
+      "channel": "openrouter_byok_over_allowance",
       "prompt_usd_per_mtok": 3.15,
       "completion_usd_per_mtok": 15.75,
-      "notes": "+5.0% past 1M reqs/mo"
+      "notes": "Past the $25,000/mo BYOK allowance: +5% of list price (charged to OpenRouter credits). Estimate; inference is billed by the upstream provider."
     },
     {
       "channel": "kilo_pass",
@@ -200,7 +212,7 @@ These are reachable through the web proxy only when `EXPOSE_ACCOUNT_DATA=true`.
 | Endpoint | Method | Response | Purpose |
 |----------|--------|----------|---------|
 | `GET /accounts/usage` | GET | `AccountsUsage` | OpenRouter credit balance and Kilo key/plan status |
-| `GET /accounts/activity` | GET | `ActivityResponse` | Per-model OpenRouter usage (last 30 days, including today) |
+| `GET /accounts/activity?period=today\|7d\|30d&group_by=model\|api_key\|app` | GET | `ActivityResponse` | OpenRouter usage for an `America/Denver` window ending now (default `today`, partial), split into credits, BYOK and combined. Invalid values return 422 |
 
 **Response Schema: AccountsUsage**
 ```json
@@ -234,25 +246,46 @@ These are reachable through the web proxy only when `EXPOSE_ACCOUNT_DATA=true`.
 **Response Schema: ActivityResponse**
 ```json
 {
+  "period": {
+    "key": "today",
+    "timezone": "America/Denver",
+    "start": "2026-10-14T06:00:00Z",
+    "end": "2026-10-14T20:00:00Z",
+    "start_date": "2026-10-14",
+    "end_date": "2026-10-14",
+    "partial": true
+  },
+  "group_by": "api_key",
+  "status": "complete",
   "items": [
     {
-      "model_id": "anthropic/claude-sonnet-4.6",
-      "requests": 1250,
-      "prompt_tokens": 15000000,
-      "completion_tokens": 5000000,
-      "cost_usd": 450.25
+      "model_id": "anthropic/claude-opus-5.5-20260921",
+      "caller": null,
+      "requests": 16,
+      "prompt_tokens": 188976,
+      "completion_tokens": 17598,
+      "reasoning_tokens": 8277,
+      "credits_usd": 0.042,
+      "byok_usd": 0.672047,
+      "total_usd": 0.714047
     }
   ],
-  "fetched_at": "2026-09-26T08:30:00Z"
+  "totals": { "credits_usd": 0.042, "byok_usd": 0.672047, "combined_usd": 0.714047 },
+  "truncated": false,
+  "warnings": [],
+  "error": null,
+  "fetched_at": "2026-10-14T20:00:01Z"
 }
 ```
+
+`status` is `complete`, `incomplete`, `unconfigured` or `error`. Item fields and totals are `null` when OpenRouter did not supply them.
 
 ## Frontend Features
 
 ### Pages
 
 1. **Dashboard (`/`)**: The account panel (when exposed) and the Top 10 coding models
-2. **Model detail modal**: Context, max output, speed and latency, tool/vision support, your 30-day usage (when exposed), the four-channel comparison table and bar chart, and a 30-day price history on a time axis. The Kilo Pass row uses `KILO_TIER` at the steady-state streak. Load errors are shown in the dialog
+2. **Model detail modal**: Context, max output, speed and latency, tool/vision support, your 30-day usage (when exposed), the five-channel comparison table and bar chart, and a 30-day price history on a time axis. The Kilo Pass row uses `KILO_TIER` at the steady-state streak. Load errors are shown in the dialog
 3. **All Models (`/trends`)**: The full catalog table, opening the same modal
 4. **Pricing Trends (`/pricing-trends`)**: Price trends over time for the top coding models
 5. **Speed (`/speed`)**: Live model-speed benchmark (see Core Features 7)
@@ -287,7 +320,7 @@ The browser calls `/api/*` on the web origin. A Next.js route handler reads `API
 
 **ModelComparison**
 - `model`: ModelPricing
-- `channels`: Four entries, each with `channel` (`openrouter_payg`, `openrouter_byok`, `kilo_pass`, `kilo_byok`), `prompt_usd_per_mtok`, `completion_usd_per_mtok` and `notes`
+- `channels`: Five entries, each with `channel` (`openrouter_payg`, `openrouter_byok`, `openrouter_byok_over_allowance`, `kilo_pass`, `kilo_byok`), `prompt_usd_per_mtok`, `completion_usd_per_mtok` and `notes`
 
 ## Scheduled Jobs (CronJobs)
 
@@ -319,12 +352,12 @@ The browser calls `/api/*` on the web origin. A Next.js route handler reads `API
 
 ### Optional (for features)
 
-- `OPENROUTER_API_KEY`: For `/credits` and, as a fallback, `/analytics/query`
-- `OPENROUTER_ADMIN_KEY`: Management key for `/analytics/query` (preferred when set)
+- `OPENROUTER_API_KEY`: For `/credits` and the kilo-diff extraction call
+- `OPENROUTER_ADMIN_KEY`: Management key for `/analytics/query`; required for `/accounts/activity` (a regular key gets HTTP 403)
 - `KILO_API_KEY`: Kilo gateway credentials
 - `KILO_BASE_URL`: Kilo gateway host (default `https://api.kilo.ai/api/gateway`); an env override for riding out a gateway outage
 - `KILO_TIER`: Active Kilo tier, `starter` / `pro` / `expert` (case-insensitive, default `starter`). Any other value fails at startup
-- `KILO_EXTRACTION_MODEL`, `KILO_SANITY_MAX_DELTA_PCT`: kilo-diff extraction model and plausibility bound
+- `KILO_EXTRACTION_MODEL`, `KILO_SANITY_MAX_DELTA_PCT`: kilo-diff extraction model and plausibility bound. The model default is the OpenRouter slug `anthropic/claude-haiku-5.5` (the native Anthropic id `claude-haiku-5-5` is not valid there). The request sends no sampling parameters, because Haiku 5.5 rejects non-default `temperature`; an empty reply (thinking can use the whole token budget) fails the extraction with the `finish_reason` and triggers the manual-review email instead of a commit
 - `GITLAB_TOKEN`, `GITLAB_API_URL`, `GITLAB_PROJECT_ID`, `GITLAB_PROJECT_PATH`: kilo-diff auto-commit target
 - `SMTP_*`: Email for the daily report and kilo-diff alerts
 
@@ -343,7 +376,8 @@ The browser calls `/api/*` on the web origin. A Next.js route handler reads `API
 - `OPENROUTER_REFRESH_SECONDS`: Expected interval between refresh runs (default 900; the models cache TTL is 3× this)
 - `SNAPSHOT_RETENTION_DAYS`: Snapshot retention before pruning (default 90; 0 disables pruning)
 - `CACHE_TTL_SECONDS`: Default cache duration for other keys (default 900)
-- `OPENROUTER_PAYG_FEE_PCT` / `OPENROUTER_BYOK_FEE_PCT`: Channel markups (default 0.055 / 0.05)
+- `OPENROUTER_PAYG_FEE_PCT` / `OPENROUTER_BYOK_FEE_PCT`: Channel markups (default 0.055 / 0.05); the BYOK fee applies only past the free allowance
+- `OPENROUTER_BYOK_FREE_ALLOWANCE_USD`: Monthly list-price BYOK inference with no OpenRouter fee (default 25000)
 
 ## Security
 

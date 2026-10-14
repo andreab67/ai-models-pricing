@@ -23,7 +23,7 @@ async def compare_channels(
     kilo_streak_months: int | None = Query(default=None, ge=1, le=120),
     kilo_annual: bool = Query(default=False),
 ) -> ModelComparison:
-    """Compare a model across the four channels.
+    """Compare a model across the five channels.
 
     Omitted Kilo assumptions default to the configured ``KILO_TIER`` at the
     steady-state streak (the month the bonus reaches its cap, derived from
