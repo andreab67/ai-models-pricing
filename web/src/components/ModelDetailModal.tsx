@@ -191,7 +191,7 @@ export function ModelDetailModal({
                 <h3 className="mt-4 mb-2 text-sm font-semibold uppercase opacity-70">
                   Your usage (last 30 days)
                 </h3>
-                <div className="grid grid-cols-2 gap-2 text-sm md:grid-cols-4">
+                <div className="grid grid-cols-2 gap-2 text-sm md:grid-cols-5">
                   <Meta label="Credit charges" value={fmtUsdOrDash(myUsage.credits_usd)} />
                   <Meta label="Upstream BYOK" value={fmtUsdOrDash(myUsage.byok_usd)} />
                   <Meta label="Requests" value={fmtCount(myUsage.requests)} />
