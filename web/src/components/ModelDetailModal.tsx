@@ -30,8 +30,8 @@ import { CHART_BLUE, CHART_GREEN } from "@/lib/chartColors";
 
 const CHANNEL_LABEL = {
   openrouter_payg: "OpenRouter PAYG",
-  openrouter_byok: "OpenRouter BYOK (within $25k/mo)",
-  openrouter_byok_over_allowance: "OpenRouter BYOK (past $25k/mo)",
+  openrouter_byok: "OpenRouter BYOK (within free allowance)",
+  openrouter_byok_over_allowance: "OpenRouter BYOK (past free allowance)",
   kilo_pass: "Kilo Pass",
   kilo_byok: "Kilo BYOK",
 } satisfies Record<Channel, string>;

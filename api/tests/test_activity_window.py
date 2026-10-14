@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 
 import pytest
 
@@ -43,6 +43,15 @@ def test_late_evening_local_time_uses_local_date_not_utc_date() -> None:
     assert window.start_date == date(2026, 10, 14)
     assert window.end_date == date(2026, 10, 14)
     assert window.end == now
+
+
+def test_now_exactly_at_local_midnight_never_yields_an_empty_range() -> None:
+    # 2026-10-14T06:00:00Z is exactly 00:00 MDT on Oct 14.
+    now = _utc(2026, 10, 14, 6)
+    window = accounts.activity_window("today", now)
+    assert window.start == now
+    assert window.end == now + timedelta(seconds=1)
+    assert window.start_date == window.end_date == date(2026, 10, 14)
 
 
 def test_dst_fall_back_changes_start_offset_per_date() -> None:

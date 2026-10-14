@@ -71,8 +71,9 @@ def _row(model: str, credits: Any, byok: Any, total: Any, **extra: Any) -> dict[
     }
 
 
-# Rows copied from the operator's real api_key_id breakdown (.audit/evidence-live.md).
-SNAPSHOT = [
+# Live sample rows (.audit/evidence-live.md s4), routed through byok_fees; the operator's own
+# figures are OPERATOR_SNAPSHOT below.
+LIVE_SAMPLE = [
     _row("openai/text-embedding-3-small", 1.2e-05, 1.025552, 1.025564, api_key_id="Hermes"),
     _row("anthropic/claude-opus-5.5-20260921", 0.042, 0.672047, 0.714047, api_key_id=None),
     _row("inclusionai/ling-3.0-flash-20260723", 0.625516, 0, 0.625516, api_key_id="crm"),
@@ -122,13 +123,13 @@ async def test_request_body(
     assert request.headers["authorization"] == "Bearer k-secret"
 
 
-# --- operator snapshot ------------------------------------------------------------
+# --- live sample + operator snapshot ----------------------------------------------
 
 
-async def test_operator_snapshot_totals_keep_credits_and_byok_apart(
+async def test_live_sample_totals_keep_credits_and_byok_apart(
     respx_mock: respx.MockRouter, fake_cache: FakeCache
 ) -> None:
-    respx_mock.post(URL).mock(return_value=httpx.Response(200, json=_payload(SNAPSHOT)))
+    respx_mock.post(URL).mock(return_value=httpx.Response(200, json=_payload(LIVE_SAMPLE)))
 
     result = await accounts.get_activity("today", "api_key", now=NOW)
 
@@ -157,6 +158,38 @@ async def test_operator_snapshot_totals_keep_credits_and_byok_apart(
     assert totals == sorted(totals, reverse=True)
     assert result.period.key == "today"
     assert result.group_by == "api_key"
+
+
+# The figures the operator saw (no byok_fees in the query), grouped by api_key.
+OPERATOR_SNAPSHOT = [
+    _row("openai/text-embedding-3-small", 0.000012, 1.037070, 1.037082, api_key_id="Hermes"),
+    _row("anthropic/claude-opus-5.5-20260921", 0.042, 0.672047, 0.714047, api_key_id=None),
+    _row("inclusionai/ling-3.0-flash-20260723", 0.682029, 0, 0.682029, api_key_id="crm"),
+    _row(
+        "inclusionai/ling-3.0-flash-20260723", 0.003351, 0, 0.003351, api_key_id="lingualab leads"
+    ),
+    _row("anthropic/claude-4.5-haiku-20251001", 0, 0.002978, 0.002978, api_key_id="models"),
+]
+
+
+async def test_operator_snapshot_combined_is_not_credit_charges(
+    respx_mock: respx.MockRouter, fake_cache: FakeCache
+) -> None:
+    respx_mock.post(URL).mock(return_value=httpx.Response(200, json=_payload(OPERATOR_SNAPSHOT)))
+
+    result = await accounts.get_activity("today", "api_key", now=NOW)
+
+    assert result.status == "complete"
+    assert result.totals.combined_usd == pytest.approx(2.439487, abs=1e-6)
+    assert result.totals.credits_usd == pytest.approx(0.727392, abs=1e-6)
+    assert result.totals.byok_usd == pytest.approx(1.712095, abs=1e-6)
+    assert result.totals.combined_usd != result.totals.credits_usd
+
+    ling = [i for i in result.items if i.model_id.startswith("inclusionai/ling-3.0-flash")]
+    assert len(ling) == 2
+    assert sum(i.total_usd or 0 for i in ling) == pytest.approx(0.685380, abs=1e-6)
+    opus = next(i for i in result.items if i.model_id.startswith("anthropic/claude-opus"))
+    assert opus.caller is None
 
 
 async def test_caller_follows_grouping(respx_mock: respx.MockRouter, fake_cache: FakeCache) -> None:

@@ -449,11 +449,6 @@ function OpenRouterActivityTable() {
           {w}
         </p>
       ))}
-      {data?.truncated === true && (
-        <p className="text-xs text-yellow-400">
-          Result truncated by OpenRouter — totals are lower bounds
-        </p>
-      )}
 
       {data && (data.status === "complete" || data.status === "incomplete") && (
         <>
@@ -483,18 +478,18 @@ function OpenRouterActivityTable() {
                 </tr>
               </thead>
               <tbody>
-                {data.items.map((item) => (
+                {data.items.map((item, index) => (
                   <tr
-                    key={`${item.model_id}\u0000${item.caller ?? ""}`}
+                    key={`${item.model_id}\u0000${item.caller ?? ""}\u0000${index}`}
                     className="border-b border-border/40 last:border-0"
                   >
                     <td className="py-1.5 font-mono text-fg/80">{item.model_id}</td>
                     {hasCaller && (
                       <td
                         className="py-1.5 text-fg/80"
-                        title={item.caller === null ? "No key/app reported by OpenRouter" : undefined}
+                        title={!item.caller ? "No key/app reported by OpenRouter" : undefined}
                       >
-                        {item.caller ?? "—"}
+                        {item.caller || "—"}
                       </td>
                     )}
                     <td className="py-1.5 text-right font-mono">{fmtCount(item.requests)}</td>

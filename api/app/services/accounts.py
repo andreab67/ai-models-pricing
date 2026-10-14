@@ -612,6 +612,7 @@ _ACTIVITY_DIMENSIONS: dict[str, list[str]] = {
 }
 _ACTIVITY_CALLER_FIELD = {"model": None, "api_key": "api_key_id", "app": "app"}
 _RECONCILE_TOLERANCE = 1e-6
+_USD_DECIMALS = 6
 _BILLING_FIELDS = ("total_usage", "credits_usage", "byok_usage")
 
 
@@ -647,6 +648,8 @@ def activity_window(period: ActivityPeriodKey, now: datetime) -> ActivityPeriod:
     end_date = end.astimezone(zone).date()
     start_date = end_date - timedelta(days=_ACTIVITY_DAYS[period] - 1)
     start = datetime.combine(start_date, time.min, tzinfo=zone).astimezone(UTC)
+    if end <= start:  # now is exactly local midnight: never send a zero-length range
+        end = start + timedelta(seconds=1)
     return ActivityPeriod(
         key=period,
         timezone=_ACTIVITY_TZ,
@@ -715,16 +718,16 @@ def _parse_activity_row(
         prompt_tokens=_opt_count(row.get("tokens_prompt")),
         completion_tokens=_opt_count(row.get("tokens_completion")),
         reasoning_tokens=_opt_count(row.get("reasoning_tokens")),
-        credits_usd=None if credits is None else round(credits, 6),
-        byok_usd=None if byok is None else round(byok, 6),
-        total_usd=None if total is None else round(total, 6),
+        credits_usd=None if credits is None else round(credits, _USD_DECIMALS),
+        byok_usd=None if byok is None else round(byok, _USD_DECIMALS),
+        total_usd=None if total is None else round(total, _USD_DECIMALS),
     )
     return item, any(v is None for v in costs.values()), unreconciled
 
 
 def _sum_present(values: list[float | None]) -> float | None:
     present = [v for v in values if v is not None]
-    return round(sum(present), 6) if present else None
+    return round(sum(present), _USD_DECIMALS) if present else None
 
 
 def _activity_response(
