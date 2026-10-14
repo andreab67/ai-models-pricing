@@ -28,6 +28,7 @@ export interface RankedModel {
 export type Channel =
   | "openrouter_payg"
   | "openrouter_byok"
+  | "openrouter_byok_over_allowance"
   | "kilo_pass"
   | "kilo_byok";
 
@@ -300,18 +301,192 @@ export function useAccountUsage() {
   return useSWR<AccountsUsage>("/api/accounts/usage", fetcher, accountConfig);
 }
 
+export type ActivityPeriodKey = "today" | "7d" | "30d";
+
+export type ActivityGroupBy = "model" | "api_key" | "app";
+
+export type ActivityStatus = "complete" | "incomplete" | "unconfigured" | "error";
+
+export interface ActivityPeriod {
+  key: ActivityPeriodKey;
+  timezone: string;
+  start: string;
+  end: string;
+  /** Local calendar date, "YYYY-MM-DD". */
+  start_date: string;
+  /** Local calendar date, "YYYY-MM-DD". */
+  end_date: string;
+  partial: boolean;
+}
+
 export interface ModelActivityItem {
   model_id: string;
-  requests: number;
-  prompt_tokens: number;
-  completion_tokens: number;
-  cost_usd: number;
+  caller: string | null;
+  requests: number | null;
+  prompt_tokens: number | null;
+  completion_tokens: number | null;
+  reasoning_tokens: number | null;
+  credits_usd: number | null;
+  byok_usd: number | null;
+  total_usd: number | null;
+}
+
+export interface ActivityTotals {
+  credits_usd: number | null;
+  byok_usd: number | null;
+  combined_usd: number | null;
 }
 
 export interface ActivityResponse {
+  period: ActivityPeriod;
+  group_by: ActivityGroupBy;
+  status: ActivityStatus;
   items: ModelActivityItem[];
+  totals: ActivityTotals;
+  truncated: boolean | null;
+  warnings: string[];
+  error: string | null;
   fetched_at: string;
 }
+
+/** Thrown when /api/accounts/activity answers 200 with a body that is not the v2 contract. */
+export class ActivityContractError extends Error {
+  constructor() {
+    super("unexpected response from API");
+    this.name = "ActivityContractError";
+  }
+}
+
+const ACTIVITY_PERIODS: readonly ActivityPeriodKey[] = ["today", "7d", "30d"];
+
+const ACTIVITY_GROUPS: readonly ActivityGroupBy[] = ["model", "api_key", "app"];
+
+const ACTIVITY_STATUSES: readonly ActivityStatus[] = [
+  "complete",
+  "incomplete",
+  "unconfigured",
+  "error",
+];
+
+const CALENDAR_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+function isObject(v: unknown): v is object {
+  return typeof v === "object" && v !== null && !Array.isArray(v);
+}
+
+function isOneOf<T extends string>(list: readonly T[], v: unknown): v is T {
+  return typeof v === "string" && list.some((x) => x === v);
+}
+
+function isNullableString(v: unknown): v is string | null {
+  return v === null || typeof v === "string";
+}
+
+function isNullableNumber(v: unknown): v is number | null {
+  return v === null || (typeof v === "number" && Number.isFinite(v));
+}
+
+function isStringArray(v: unknown): v is string[] {
+  return Array.isArray(v) && v.every((x): x is string => typeof x === "string");
+}
+
+function isCalendarDate(v: unknown): v is string {
+  return typeof v === "string" && CALENDAR_DATE.test(v);
+}
+
+function isActivityPeriod(v: unknown): v is ActivityPeriod {
+  return (
+    isObject(v) &&
+    "key" in v &&
+    isOneOf(ACTIVITY_PERIODS, v.key) &&
+    "timezone" in v &&
+    isString(v.timezone) &&
+    "start" in v &&
+    isString(v.start) &&
+    "end" in v &&
+    isString(v.end) &&
+    "start_date" in v &&
+    isCalendarDate(v.start_date) &&
+    "end_date" in v &&
+    isCalendarDate(v.end_date) &&
+    "partial" in v &&
+    typeof v.partial === "boolean"
+  );
+}
+
+function isActivityItem(v: unknown): v is ModelActivityItem {
+  return (
+    isObject(v) &&
+    "model_id" in v &&
+    isString(v.model_id) &&
+    "caller" in v &&
+    isNullableString(v.caller) &&
+    "requests" in v &&
+    isNullableNumber(v.requests) &&
+    "prompt_tokens" in v &&
+    isNullableNumber(v.prompt_tokens) &&
+    "completion_tokens" in v &&
+    isNullableNumber(v.completion_tokens) &&
+    "reasoning_tokens" in v &&
+    isNullableNumber(v.reasoning_tokens) &&
+    "credits_usd" in v &&
+    isNullableNumber(v.credits_usd) &&
+    "byok_usd" in v &&
+    isNullableNumber(v.byok_usd) &&
+    "total_usd" in v &&
+    isNullableNumber(v.total_usd)
+  );
+}
+
+function isActivityTotals(v: unknown): v is ActivityTotals {
+  return (
+    isObject(v) &&
+    "credits_usd" in v &&
+    isNullableNumber(v.credits_usd) &&
+    "byok_usd" in v &&
+    isNullableNumber(v.byok_usd) &&
+    "combined_usd" in v &&
+    isNullableNumber(v.combined_usd)
+  );
+}
+
+/**
+ * Runtime guard for GET /accounts/activity. Rejects anything that is not the
+ * v2 contract, for example the pre-v2 `{items, fetched_at}` body served during
+ * a rollout (no `period`/`totals`/`status`), or garbage.
+ */
+function isActivityResponse(v: unknown): v is ActivityResponse {
+  return (
+    isObject(v) &&
+    "period" in v &&
+    isActivityPeriod(v.period) &&
+    "group_by" in v &&
+    isOneOf(ACTIVITY_GROUPS, v.group_by) &&
+    "status" in v &&
+    isOneOf(ACTIVITY_STATUSES, v.status) &&
+    "items" in v &&
+    Array.isArray(v.items) &&
+    v.items.every(isActivityItem) &&
+    "totals" in v &&
+    isActivityTotals(v.totals) &&
+    "truncated" in v &&
+    (v.truncated === null || typeof v.truncated === "boolean") &&
+    "warnings" in v &&
+    isStringArray(v.warnings) &&
+    "error" in v &&
+    isNullableString(v.error) &&
+    "fetched_at" in v &&
+    isString(v.fetched_at)
+  );
+}
+
+const activityFetcher = async (url: string): Promise<ActivityResponse> => {
+  const body = await fetcher<unknown>(url);
+
+  if (!isActivityResponse(body)) throw new ActivityContractError();
+
+  return body;
+};
 
 export function useKiloModels() {
   return useSWR<ModelPricing[]>("/api/kilo/models", fetcher, {
@@ -320,11 +495,17 @@ export function useKiloModels() {
   });
 }
 
-export function useActivity() {
-  return useSWR<ActivityResponse>("/api/accounts/activity", fetcher, {
-    ...accountConfig,
-    refreshInterval: 900_000, // 15 min
-  });
+export function useActivity(period: ActivityPeriodKey, groupBy: ActivityGroupBy) {
+  const params = new URLSearchParams({ period, group_by: groupBy });
+
+  return useSWR<ActivityResponse>(
+    `/api/accounts/activity?${params.toString()}`,
+    activityFetcher,
+    {
+      ...accountConfig,
+      refreshInterval: 900_000, // 15 min
+    },
+  );
 }
 
 export function fmtUsd(n: number): string {
@@ -339,6 +520,17 @@ export function fmtUsd(n: number): string {
   if (abs < 1) return `${sign}$${abs.toFixed(3)}`;
 
   return `${sign}$${abs.toFixed(2)}`;
+}
+
+export function fmtUsdOrDash(n: number | null): string {
+  return n === null ? "—" : fmtUsd(n);
+}
+
+/** Counts from the activity API are nullable; null means "not reported", never 0. */
+export function fmtCount(n: number | null): string {
+  if (n === null || !Number.isFinite(n)) return "—";
+
+  return n.toLocaleString();
 }
 
 export function fmtSpeed(n: number | null | undefined): string {
