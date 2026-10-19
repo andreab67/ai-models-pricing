@@ -35,6 +35,7 @@ services:
     ports: ["8000:8000"]
     # Provider API keys, SMTP, etc. (copy api/.env.example to api/.env).
     # Values under `environment` below take precedence.
+    # The long env_file form with `required:` needs Docker Compose v2.24+.
     env_file:
       - path: ./api/.env
         required: false
@@ -53,8 +54,6 @@ services:
     environment:
       # Read at request time by the web proxy route.
       API_BASE_URL: http://api:8000
-      # Local dev only: show the account-spend panel.
-      EXPOSE_ACCOUNT_DATA: "true"
     depends_on:
       api: { condition: service_started }
 

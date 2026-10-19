@@ -1,5 +1,7 @@
 # Full codebase review — 2026-09-26
 
+> Historical record, ported from the GitHub repository on 2026-10-19. The status below is as of 2026-09-26; the review branch it names existed only on GitHub, and its fixes have since reached GitLab `main`.
+
 **Status:** fixes complete on the review branch; merge proposed, not merged. Pipeline verification was waived by the repository owner (this GitHub repository has no CI that runs; `.gitlab-ci.yml` only runs on a GitLab mirror).
 
 | | |
