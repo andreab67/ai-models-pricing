@@ -33,6 +33,12 @@ services:
   api:
     build: ./api
     ports: ["8000:8000"]
+    # Provider API keys, SMTP, etc. (copy api/.env.example to api/.env).
+    # Values under `environment` below take precedence.
+    # The long env_file form with `required:` needs Docker Compose v2.24+.
+    env_file:
+      - path: ./api/.env
+        required: false
     environment:
       DATABASE_URL: postgresql+psycopg://pricing:pricing@postgres:5432/pricing
       REDIS_URL: redis://redis:6379/0
@@ -46,6 +52,7 @@ services:
     build: ./web
     ports: ["3000:3000"]
     environment:
+      # Read at request time by the web proxy route.
       API_BASE_URL: http://api:8000
     depends_on:
       api: { condition: service_started }
