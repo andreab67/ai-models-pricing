@@ -102,7 +102,7 @@ async def test_request_body(
 
     await accounts.get_activity("7d", group_by, now=NOW)  # type: ignore[arg-type]
 
-    request = route.calls.last.request
+    request = route.calls[0].request
     body = json.loads(request.content)
     assert body["time_range"] == {"start": "2026-10-08T06:00:00Z", "end": "2026-10-14T20:00:00Z"}
     assert body["metrics"] == [
@@ -121,6 +121,76 @@ async def test_request_body(
     # Top-level start/end are silently ignored upstream; only time_range may carry the window.
     assert not {"start", "end", "start_time", "date_range"} & body.keys()
     assert request.headers["authorization"] == "Bearer k-secret"
+    if group_by == "app":
+        assert body["filters"] == [{"field": "app", "operator": "neq", "value": -1}]
+        fallback = json.loads(route.calls[1].request.content)
+        assert fallback["dimensions"] == ["model", "api_key_id"]
+        assert fallback["filters"] == [{"field": "app", "operator": "eq", "value": -1}]
+        assert fallback["time_range"] == body["time_range"]
+
+
+async def test_app_names_fall_back_to_keys_without_double_counting(
+    respx_mock: respx.MockRouter, fake_cache: FakeCache
+) -> None:
+    named = [_row("shared/model", 1, 0, 1, app="model-speed", request_count="12")]
+    unnamed = [
+        _row("shared/model", 0, 0.25, 0.25, api_key_id="Hermes", request_count="3"),
+        _row("shared/model", 0, 0.5, 0.5, api_key_id="crm", request_count="5"),
+    ]
+    respx_mock.post(URL).mock(side_effect=[
+        httpx.Response(200, json=_payload(named)),
+        httpx.Response(200, json=_payload(unnamed)),
+    ])
+
+    result = await accounts.get_activity("today", "app", now=NOW)
+
+    assert result.status == "complete"
+    assert {i.caller for i in result.items} == {"model-speed", "Hermes (API key)", "crm (API key)"}
+    assert sum(i.requests for i in result.items) == 20
+    assert result.totals == ActivityTotals(credits_usd=1, byok_usd=0.75, combined_usd=1.75)
+
+
+@pytest.mark.parametrize("key_name", [None, "", "   ", "Unknown"])
+async def test_app_without_a_key_name_is_unattributed(
+    respx_mock: respx.MockRouter, fake_cache: FakeCache, key_name: str | None
+) -> None:
+    respx_mock.post(URL).mock(side_effect=[
+        httpx.Response(200, json=_payload([])),
+        httpx.Response(200, json=_payload([_row("a/m", 1, 0, 1, api_key_id=key_name)])),
+    ])
+
+    result = await accounts.get_activity("today", "app", now=NOW)
+
+    assert result.items[0].caller == "Unattributed"
+
+
+@pytest.mark.parametrize("truncated", [True, None])
+async def test_app_fallback_truncation_is_reported(
+    respx_mock: respx.MockRouter, fake_cache: FakeCache, truncated: bool | None
+) -> None:
+    respx_mock.post(URL).mock(side_effect=[
+        httpx.Response(200, json=_payload([])),
+        httpx.Response(200, json=_payload([], truncated=truncated)),
+    ])
+
+    result = await accounts.get_activity("today", "app", now=NOW)
+
+    assert result.status == "incomplete"
+    assert result.truncated is truncated
+
+
+async def test_app_fallback_failure_reports_error(
+    respx_mock: respx.MockRouter, fake_cache: FakeCache
+) -> None:
+    respx_mock.post(URL).mock(side_effect=[
+        httpx.Response(200, json=_payload([_row("a/m", 1, 0, 1, app="model-speed")])),
+        httpx.Response(500),
+    ])
+
+    result = await accounts.get_activity("today", "app", now=NOW)
+
+    assert result.status == "error"
+    assert result.items == []
 
 
 # --- live sample + operator snapshot ----------------------------------------------
@@ -197,7 +267,12 @@ async def test_caller_follows_grouping(respx_mock: respx.MockRouter, fake_cache:
         _row("a/m", 1, 0, 1, api_key_id="k1", app="Chatroom"),
         _row("b/m", 0.5, 0, 0.5, api_key_id=None, app=None),
     ]
-    respx_mock.post(URL).mock(return_value=httpx.Response(200, json=_payload(rows)))
+    def respond(request: httpx.Request) -> httpx.Response:
+        filters = json.loads(request.content).get("filters", [])
+        is_fallback = filters == [{"field": "app", "operator": "eq", "value": -1}]
+        return httpx.Response(200, json=_payload([] if is_fallback else rows))
+
+    respx_mock.post(URL).mock(side_effect=respond)
 
     by_model = await accounts.get_activity("today", "model", now=NOW)
     assert [i.caller for i in by_model.items] == [None, None]
@@ -336,7 +411,7 @@ async def test_provider_failures_report_error(
     assert result.items == []
     assert result.totals == ActivityTotals()
     assert result.truncated is None
-    assert fake_cache.ttls["accounts:activity:v2:30d:app"] == accounts._FAILURE_CACHE_TTL
+    assert fake_cache.ttls["accounts:activity:v3:30d:app"] == accounts._FAILURE_CACHE_TTL
 
 
 async def test_transport_failure_reports_error(
@@ -385,7 +460,7 @@ async def test_cache_keys_and_ttls_per_period_and_grouping(
     assert fake_cache.ttls == {
         "accounts:activity:v2:today:model": accounts._ACTIVITY_TODAY_CACHE_TTL,
         "accounts:activity:v2:7d:model": accounts._ACTIVITY_CACHE_TTL,
-        "accounts:activity:v2:7d:app": accounts._ACTIVITY_CACHE_TTL,
+        "accounts:activity:v3:7d:app": accounts._ACTIVITY_CACHE_TTL,
         "accounts:activity:v2:30d:api_key": accounts._ACTIVITY_CACHE_TTL,
     }
     assert accounts._ACTIVITY_TODAY_CACHE_TTL == 300

@@ -505,6 +505,9 @@ function OpenRouterActivityTable() {
             </table>
           )}
           <p className="text-[10px] text-muted/60">
+            {groupBy === "app" && (
+              <>Rows without an app name use the API key name, marked (API key). </>
+            )}
             BYOK usage is billed by the upstream provider, not OpenRouter, and provider credits
             may cover it (e.g. the Claude Max 5x $100/mo API credit on the linked Anthropic
             Console org covers eligible Anthropic API usage; it does not cover OpenAI

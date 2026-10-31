@@ -821,7 +821,8 @@ async def get_activity(
     if not key:
         return _activity_response(window, group_by, status="unconfigured")
 
-    cache_key = f"accounts:activity:v2:{period}:{group_by}"
+    cache_version = "v3" if group_by == "app" else "v2"
+    cache_key = f"accounts:activity:{cache_version}:{period}:{group_by}"
     hit = await _read_activity_cache(cache_key, window)
     if hit is not None:
         return hit
@@ -837,7 +838,40 @@ async def get_activity(
         "limit": _ACTIVITY_LIMIT,
     }
     try:
-        rows, truncated = await _fetch_activity_rows(key, body)
+        if group_by == "app":
+            # OpenRouter allows only two dimensions. Split on its unset app
+            # sentinel (-1), so named apps and key fallbacks never overlap.
+            rows, app_truncated = await _fetch_activity_rows(
+                key,
+                {**body, "filters": [{"field": "app", "operator": "neq", "value": -1}]},
+            )
+            key_rows, key_truncated = await _fetch_activity_rows(
+                key,
+                {
+                    **body,
+                    "dimensions": ["model", "api_key_id"],
+                    "filters": [{"field": "app", "operator": "eq", "value": -1}],
+                },
+            )
+            for row in key_rows:
+                if isinstance(row, dict):
+                    name = row.get("api_key_id")
+                    name = name.strip() if isinstance(name, str) else ""
+                    label = (
+                        f"{name} (API key)"
+                        if name and name.casefold() != "unknown"
+                        else "Unattributed"
+                    )
+                    rows.append({**row, "app": label})
+                else:
+                    rows.append(row)  # preserve malformed-row reporting below
+            truncated = (
+                True
+                if app_truncated is True or key_truncated is True
+                else None if app_truncated is None or key_truncated is None else False
+            )
+        else:
+            rows, truncated = await _fetch_activity_rows(key, body)
     except _ActivityError as exc:
         log.warning("openrouter_activity_failed", error=str(exc))
         failed = _activity_response(window, group_by, status="error", error=str(exc))
