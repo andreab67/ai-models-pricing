@@ -20,6 +20,7 @@ from app.schemas import ActivityResponse, ActivityTotals
 from app.services import accounts
 
 URL = "https://openrouter.ai/api/v1/analytics/query"
+KEYS_URL = "https://openrouter.ai/api/v1/keys"
 # 2026-10-14 14:00 MDT
 NOW = datetime(2026, 10, 14, 20, 0, 0, tzinfo=UTC)
 
@@ -48,6 +49,11 @@ def fake_cache(monkeypatch: pytest.MonkeyPatch) -> FakeCache:
 @pytest.fixture(autouse=True)
 def admin_key(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(accounts._settings, "openrouter_admin_key", "k-secret")
+
+
+@pytest.fixture(autouse=True)
+def key_listing(respx_mock: respx.MockRouter) -> None:
+    respx_mock.get(KEYS_URL).mock(return_value=httpx.Response(200, json={"data": []}))
 
 
 def _payload(rows: list[Any], truncated: bool | None = False) -> dict[str, Any]:
@@ -136,6 +142,7 @@ async def test_app_names_fall_back_to_keys_without_double_counting(
     unnamed = [
         _row("shared/model", 0, 0.25, 0.25, api_key_id="Hermes", request_count="3"),
         _row("shared/model", 0, 0.5, 0.5, api_key_id="crm", request_count="5"),
+        _row("shared/model", 0, 0, 0, api_key_id="nas-cleanup", request_count="1"),
     ]
     respx_mock.post(URL).mock(side_effect=[
         httpx.Response(200, json=_payload(named)),
@@ -145,9 +152,95 @@ async def test_app_names_fall_back_to_keys_without_double_counting(
     result = await accounts.get_activity("today", "app", now=NOW)
 
     assert result.status == "complete"
-    assert {i.caller for i in result.items} == {"model-speed", "Hermes (API key)", "crm (API key)"}
-    assert sum(i.requests for i in result.items) == 20
+    assert {i.caller for i in result.items} == {"model-speed", "Hermes", "crm", "nas-cleanup"}
+    assert sum(i.requests for i in result.items) == 21
     assert result.totals == ActivityTotals(credits_usd=1, byok_usd=0.75, combined_usd=1.75)
+
+
+async def test_hermes_key_overrides_reported_app_without_double_counting(
+    respx_mock: respx.MockRouter, fake_cache: FakeCache
+) -> None:
+    hashes = ["a" * 64, "b" * 64]
+    listing = respx_mock.get(KEYS_URL).mock(side_effect=[
+        httpx.Response(200, json={"data": [{"name": "speed", "hash": "c" * 64}]}),
+        httpx.Response(200, json={"data": [
+            {"name": "Hermes", "hash": hashes[0]},
+            {"name": " hermes ", "hash": hashes[1], "disabled": True},
+        ]}),
+        httpx.Response(200, json={"data": []}),
+    ])
+    route = respx_mock.post(URL).mock(side_effect=[
+        httpx.Response(200, json=_payload([
+            _row("shared/model", 1, 0, 1, app="model-speed", request_count="12"),
+        ])),
+        httpx.Response(200, json=_payload([
+            _row("shared/model", 0, 0.5, 0.5, api_key_id="crm", request_count="5"),
+        ])),
+        httpx.Response(200, json=_payload([
+            _row("shared/model", 0, 0.25, 0.25, request_count="3"),
+            _row("openai/text-embedding-3-small", 0, 0.01, 0.01, request_count="7"),
+        ])),
+    ])
+
+    result = await accounts.get_activity("today", "app", now=NOW)
+
+    assert result.status == "complete"
+    assert {(i.model_id, i.caller, i.requests) for i in result.items} == {
+        ("shared/model", "model-speed", 12),
+        ("shared/model", "crm", 5),
+        ("shared/model", "Hermes", 3),
+        ("openai/text-embedding-3-small", "Hermes", 7),
+    }
+    assert result.totals == ActivityTotals(credits_usd=1, byok_usd=0.76, combined_usd=1.76)
+    bodies = [json.loads(call.request.content) for call in route.calls]
+    excluded = {"field": "api_key_id", "operator": "not_in", "value": hashes}
+    assert bodies[0]["filters"] == [
+        {"field": "app", "operator": "neq", "value": -1}, excluded,
+    ]
+    assert bodies[1]["filters"] == [
+        {"field": "app", "operator": "eq", "value": -1}, excluded,
+    ]
+    assert bodies[2]["dimensions"] == ["model"]
+    assert bodies[2]["filters"] == [
+        {"field": "api_key_id", "operator": "in", "value": hashes},
+    ]
+    assert {call.request.url.params["offset"] for call in listing.calls} == {"0", "1", "3"}
+    assert listing.calls[0].request.url.params["include_disabled"] == "true"
+    assert listing.calls[0].request.headers["authorization"] == "Bearer k-secret"
+
+
+@pytest.mark.parametrize("payload", [{}, {"data": None}, {"data": [None]},
+                                    {"data": [{"name": "Hermes", "hash": "bad"}]},
+                                    {"data": [{"name": "Hermes", "hash": "a" * 64}] * 2}])
+async def test_invalid_key_listing_never_silently_misattributes_hermes(
+    respx_mock: respx.MockRouter, fake_cache: FakeCache, payload: Any
+) -> None:
+    respx_mock.get(KEYS_URL).mock(return_value=httpx.Response(200, json=payload))
+    respx_mock.post(URL).mock(return_value=httpx.Response(200, json=_payload([])))
+
+    result = await accounts.get_activity("today", "app", now=NOW)
+
+    assert result.status == "error"
+    assert result.items == []
+
+
+@pytest.mark.parametrize("response", [
+    httpx.Response(403), httpx.Response(200, text="not-json"), httpx.ConnectTimeout("slow"),
+])
+async def test_key_listing_failures_are_reported_without_leaking_credentials(
+    respx_mock: respx.MockRouter, fake_cache: FakeCache, response: Any
+) -> None:
+    if isinstance(response, Exception):
+        respx_mock.get(KEYS_URL).mock(side_effect=response)
+    else:
+        respx_mock.get(KEYS_URL).mock(return_value=response)
+
+    result = await accounts.get_activity("today", "app", now=NOW)
+
+    assert result.status == "error"
+    assert result.items == []
+    assert "OpenRouter key listing" in result.error
+    assert "k-secret" not in result.error
 
 
 @pytest.mark.parametrize("key_name", [None, "", "   ", "Unknown"])
@@ -165,12 +258,17 @@ async def test_app_without_a_key_name_is_unattributed(
 
 
 @pytest.mark.parametrize("truncated", [True, None])
+@pytest.mark.parametrize("source", [0, 1, 2])
 async def test_app_fallback_truncation_is_reported(
-    respx_mock: respx.MockRouter, fake_cache: FakeCache, truncated: bool | None
+    respx_mock: respx.MockRouter, fake_cache: FakeCache, truncated: bool | None, source: int
 ) -> None:
+    respx_mock.get(KEYS_URL).mock(side_effect=[
+        httpx.Response(200, json={"data": [{"name": "Hermes", "hash": "a" * 64}]}),
+        httpx.Response(200, json={"data": []}),
+    ])
     respx_mock.post(URL).mock(side_effect=[
-        httpx.Response(200, json=_payload([])),
-        httpx.Response(200, json=_payload([], truncated=truncated)),
+        httpx.Response(200, json=_payload([], truncated=truncated if i == source else False))
+        for i in range(3)
     ])
 
     result = await accounts.get_activity("today", "app", now=NOW)
@@ -411,7 +509,7 @@ async def test_provider_failures_report_error(
     assert result.items == []
     assert result.totals == ActivityTotals()
     assert result.truncated is None
-    assert fake_cache.ttls["accounts:activity:v3:30d:app"] == accounts._FAILURE_CACHE_TTL
+    assert fake_cache.ttls["accounts:activity:v4:30d:app"] == accounts._FAILURE_CACHE_TTL
 
 
 async def test_transport_failure_reports_error(
@@ -460,7 +558,7 @@ async def test_cache_keys_and_ttls_per_period_and_grouping(
     assert fake_cache.ttls == {
         "accounts:activity:v2:today:model": accounts._ACTIVITY_TODAY_CACHE_TTL,
         "accounts:activity:v2:7d:model": accounts._ACTIVITY_CACHE_TTL,
-        "accounts:activity:v3:7d:app": accounts._ACTIVITY_CACHE_TTL,
+        "accounts:activity:v4:7d:app": accounts._ACTIVITY_CACHE_TTL,
         "accounts:activity:v2:30d:api_key": accounts._ACTIVITY_CACHE_TTL,
     }
     assert accounts._ACTIVITY_TODAY_CACHE_TTL == 300

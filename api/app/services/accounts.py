@@ -803,6 +803,97 @@ async def _fetch_activity_rows(key: str, body: dict[str, Any]) -> tuple[list[Any
     return rows, truncated if isinstance(truncated, bool) else None
 
 
+async def _hermes_key_hashes(key: str) -> list[str]:
+    """Resolve Hermes names to hashes: analytics filters do not accept key names."""
+    hashes: list[str] = []
+    offset = 0
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            while True:
+                resp = await client.get(
+                    "https://openrouter.ai/api/v1/keys",
+                    headers={"Authorization": f"Bearer {key}"},
+                    params={
+                        "include_disabled": "true", "include_expired": "true", "offset": offset,
+                    },
+                )
+                resp.raise_for_status()
+                payload = resp.json()
+                rows = payload.get("data") if isinstance(payload, dict) else None
+                if not isinstance(rows, list):
+                    raise _ActivityError(
+                        "OpenRouter key listing returned an unexpected response shape"
+                    )
+                if not rows:
+                    return hashes
+                for row in rows:
+                    if not isinstance(row, dict):
+                        raise _ActivityError("OpenRouter key listing returned an invalid key")
+                    name = row.get("name")
+                    if not isinstance(name, str) or name.strip().casefold() != "hermes":
+                        continue
+                    key_hash = row.get("hash")
+                    if (
+                        not isinstance(key_hash, str)
+                        or len(key_hash) != 64
+                        or any(c not in "0123456789abcdef" for c in key_hash)
+                    ):
+                        raise _ActivityError(
+                            "OpenRouter key listing returned an invalid Hermes hash"
+                        )
+                    if key_hash in hashes:
+                        raise _ActivityError("OpenRouter key listing repeated a Hermes key")
+                    hashes.append(key_hash)
+                offset += len(rows)
+    except httpx.HTTPError as exc:
+        raise _ActivityError(f"OpenRouter key listing failed ({type(exc).__name__})") from exc
+    except ValueError as exc:
+        raise _ActivityError("OpenRouter key listing returned invalid JSON") from exc
+
+
+async def _fetch_app_activity_rows(
+    key: str, body: dict[str, Any]
+) -> tuple[list[Any], bool | None]:
+    """Partition Hermes, named apps and unnamed apps into disjoint query results."""
+    hermes_hashes = await _hermes_key_hashes(key)
+    exclude_hermes = (
+        [{"field": "api_key_id", "operator": "not_in", "value": hermes_hashes}]
+        if hermes_hashes else []
+    )
+    queries = [
+        {**body, "filters": [{"field": "app", "operator": "neq", "value": -1}, *exclude_hermes]},
+        {
+            **body,
+            "dimensions": ["model", "api_key_id"],
+            "filters": [{"field": "app", "operator": "eq", "value": -1}, *exclude_hermes],
+        },
+    ]
+    if hermes_hashes:
+        queries.append({
+            **body,
+            "dimensions": ["model"],
+            "filters": [{"field": "api_key_id", "operator": "in", "value": hermes_hashes}],
+        })
+    results = await asyncio.gather(*(_fetch_activity_rows(key, query) for query in queries))
+    rows = list(results[0][0])
+    for row in results[1][0]:
+        if isinstance(row, dict):
+            name = row.get("api_key_id")
+            name = name.strip() if isinstance(name, str) else ""
+            label = "Unattributed"
+            if name and name.casefold() != "unknown":
+                label = "Hermes" if name.casefold() == "hermes" else name
+            rows.append({**row, "app": label})
+        else:
+            rows.append(row)  # preserve malformed-row reporting below
+    if hermes_hashes:
+        for row in results[2][0]:
+            rows.append({**row, "app": "Hermes"} if isinstance(row, dict) else row)
+    flags = [flag for _, flag in results]
+    truncated = True if True in flags else None if None in flags else False
+    return rows, truncated
+
+
 async def get_activity(
     period: ActivityPeriodKey = "today",
     group_by: ActivityGroupBy = "model",
@@ -821,7 +912,7 @@ async def get_activity(
     if not key:
         return _activity_response(window, group_by, status="unconfigured")
 
-    cache_version = "v3" if group_by == "app" else "v2"
+    cache_version = "v4" if group_by == "app" else "v2"
     cache_key = f"accounts:activity:{cache_version}:{period}:{group_by}"
     hit = await _read_activity_cache(cache_key, window)
     if hit is not None:
@@ -839,37 +930,7 @@ async def get_activity(
     }
     try:
         if group_by == "app":
-            # OpenRouter allows only two dimensions. Split on its unset app
-            # sentinel (-1), so named apps and key fallbacks never overlap.
-            rows, app_truncated = await _fetch_activity_rows(
-                key,
-                {**body, "filters": [{"field": "app", "operator": "neq", "value": -1}]},
-            )
-            key_rows, key_truncated = await _fetch_activity_rows(
-                key,
-                {
-                    **body,
-                    "dimensions": ["model", "api_key_id"],
-                    "filters": [{"field": "app", "operator": "eq", "value": -1}],
-                },
-            )
-            for row in key_rows:
-                if isinstance(row, dict):
-                    name = row.get("api_key_id")
-                    name = name.strip() if isinstance(name, str) else ""
-                    label = (
-                        f"{name} (API key)"
-                        if name and name.casefold() != "unknown"
-                        else "Unattributed"
-                    )
-                    rows.append({**row, "app": label})
-                else:
-                    rows.append(row)  # preserve malformed-row reporting below
-            truncated = (
-                True
-                if app_truncated is True or key_truncated is True
-                else None if app_truncated is None or key_truncated is None else False
-            )
+            rows, truncated = await _fetch_app_activity_rows(key, body)
         else:
             rows, truncated = await _fetch_activity_rows(key, body)
     except _ActivityError as exc:
