@@ -10,7 +10,7 @@ This document provides a comprehensive inventory of all dependencies, libraries,
 - **SQLAlchemy** 2.0+ - SQL toolkit and ORM
 - **Alembic** - Database migrations
 - **Pydantic** 2.0+ - Data validation
-- **psycopg** (PostgreSQL async driver)
+- **psycopg** 3.3.7 (PostgreSQL driver with binary wheels and pooling)
 - **redis** - Redis client
 - **httpx** - Async HTTP client
 - **tenacity** - Retry library
