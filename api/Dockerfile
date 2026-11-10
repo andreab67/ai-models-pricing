@@ -45,10 +45,15 @@ COPY --from=builder /wheels /wheels
 RUN pip install --no-index --find-links=/wheels /wheels/*.whl \
     && rm -rf /wheels \
     && python -m pip uninstall -y pip setuptools wheel \
-    && rm -rf /usr/local/lib/python3*/site-packages/pip* \
-              /usr/local/lib/python3*/site-packages/setuptools* \
+    && rm -rf /usr/local/lib/python3*/site-packages/pip \
+              /usr/local/lib/python3*/site-packages/pip-*.dist-info \
+              /usr/local/lib/python3*/site-packages/setuptools \
+              /usr/local/lib/python3*/site-packages/setuptools-*.dist-info \
+              /usr/local/lib/python3*/site-packages/wheel \
+              /usr/local/lib/python3*/site-packages/wheel-*.dist-info \
               /usr/local/lib/python3*/site-packages/pkg_resources \
               /usr/local/lib/python3*/site-packages/_distutils_hack \
+              /usr/local/lib/python3*/site-packages/distutils-precedence.pth \
               /usr/local/lib/python3*/ensurepip/_bundled
 
 COPY --chown=app:app . /app

@@ -97,3 +97,44 @@ async def test_fetch_models_drops_unpriced_records_and_keeps_priced_ones(
     )
     models = await kilo_gateway.fetch_models()
     assert sorted(m.id for m in models) == ["kilo/free", "kilo/paid"]
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_kilo_gateway_all_records_unpriced_raises_unavailable(_kilo_network: None) -> None:
+    """Kilo answered with records but none is usable: that is not 'zero models'."""
+    payload = {
+        "data": [{"id": "kilo/a"}, _raw("kilo/b", prompt="nan"), _raw("kilo/c", completion=None)]
+    }
+    respx.get(f"{kilo_gateway._BASE_URL}/models").mock(
+        return_value=httpx.Response(200, json=payload)
+    )
+    with pytest.raises(kilo_gateway.KiloUnavailable, match="none had a usable price"):
+        await kilo_gateway.fetch_models()
+
+
+@respx.mock
+def test_kilo_models_route_503s_when_all_records_unpriced(
+    _kilo_network: None,
+) -> None:
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from app.routes.compare import kilo_router
+
+    app = FastAPI()
+    app.include_router(kilo_router)
+    respx.get(f"{kilo_gateway._BASE_URL}/models").mock(
+        return_value=httpx.Response(200, json={"data": [{"id": "kilo/a"}]})
+    )
+    resp = TestClient(app, raise_server_exceptions=False).get("/kilo/models")
+    assert resp.status_code == 503
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_kilo_empty_catalog_stays_a_valid_empty_answer(_kilo_network: None) -> None:
+    respx.get(f"{kilo_gateway._BASE_URL}/models").mock(
+        return_value=httpx.Response(200, json={"data": []})
+    )
+    assert await kilo_gateway.fetch_models() == []

@@ -189,7 +189,11 @@ docker build -t <registry>/web:latest web/
 docker push <registry>/api:latest
 docker push <registry>/web:latest
 
-# 2. Deploy (CI does this automatically via deploy:k8s on push to main)
+# 2. Apply the manifests. This is a manual step: the deploy:k8s CI job only runs
+#    `kubectl set image` + `rollout status`, it does not apply k8s/. Changes under
+#    k8s/ (env, secret scoping, schedules) reach the cluster only through this.
+#    The overlay pins `:latest`; to keep the images CI deployed, rewrite the tags
+#    to the live SHAs first (see the one-time command in the MR description).
 kubectl apply -k k8s/overlays/prod
 
 # 3. Verify

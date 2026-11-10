@@ -223,3 +223,21 @@ async def test_response_under_the_cap_is_parsed() -> None:
         mock.get(MODELS_URL).mock(return_value=httpx.Response(200, json=payload))
         raw = await openrouter.fetch_raw()
     assert [r["id"] for r in raw] == ["a/b", "c/d"]
+
+
+async def test_fetch_raw_gzip_response_over_cap_rejected(small_cap: int) -> None:
+    """A tiny compressed body that inflates past the cap (gzip bomb) is refused:
+    the cap counts decompressed bytes, not Content-Length."""
+    import gzip
+
+    body = gzip.compress(json.dumps({"data": [], "pad": "x" * 200_000}).encode())
+    assert len(body) < small_cap  # passes any Content-Length check
+    with respx.mock() as mock:
+        route = mock.get(MODELS_URL).mock(
+            return_value=httpx.Response(
+                200, content=body, headers={"content-encoding": "gzip"}
+            )
+        )
+        with pytest.raises(openrouter.ResponseTooLargeError):
+            await openrouter.fetch_raw()
+    assert route.call_count == 1

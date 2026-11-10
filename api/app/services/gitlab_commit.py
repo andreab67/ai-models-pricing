@@ -36,6 +36,10 @@ def _project_url() -> str:
 
 
 def _client() -> httpx.AsyncClient:
+    if not _settings.gitlab_token:
+        # An empty PRIVATE-TOKEN header would just come back as a 401 from the
+        # first call; fail before any request with a message that names the fix.
+        raise RuntimeError("GITLAB_TOKEN is not set; cannot open the pricing merge request")
     return httpx.AsyncClient(
         timeout=30.0, headers={"PRIVATE-TOKEN": _settings.gitlab_token}
     )
@@ -93,6 +97,15 @@ async def branch_exists(branch: str) -> bool:
         return True
 
 
+async def delete_branch(branch: str) -> None:
+    async with _client() as client:
+        resp = await client.delete(
+            f"{_project_url()}/repository/branches/{quote(branch, safe='')}"
+        )
+        if resp.status_code != 404:
+            resp.raise_for_status()
+
+
 async def create_merge_request(
     source_branch: str,
     title: str,
@@ -126,8 +139,10 @@ async def propose_file_change(
     """Commit to a bot ``branch`` cut from main and open an MR for review.
 
     Idempotent across retries: an open MR for ``branch`` is returned as is
-    (no second MR); an existing branch (a previous run committed but failed
-    before opening the MR) is not committed to again.
+    (no second MR). A branch that exists with no open MR (a closed MR whose
+    branch was not removed, or a run that committed but failed before opening
+    the MR) is deleted and recreated from main, so the MR never carries a
+    stale commit cut from an old main.
     """
     existing = await find_open_merge_request(branch)
     if existing:
@@ -135,9 +150,9 @@ async def propose_file_change(
         return Proposal(branch=branch, mr_url=existing, created=False)
 
     if await branch_exists(branch):
-        log.warning("kilo_branch_exists_without_mr", branch=branch)
-    else:
-        await commit_file(path, content, message, branch=branch, start_branch=DEFAULT_BRANCH)
+        log.warning("kilo_branch_exists_without_mr_recreating", branch=branch)
+        await delete_branch(branch)
+    await commit_file(path, content, message, branch=branch, start_branch=DEFAULT_BRANCH)
 
     mr_url = await create_merge_request(
         branch, mr_title, mr_description, _settings.gitlab_mr_assignee_id

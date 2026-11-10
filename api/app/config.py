@@ -54,7 +54,7 @@ class Settings(BaseSettings):
     kilo_extraction_model: str = Field(default="anthropic/claude-haiku-5.5")
     kilo_sanity_max_delta_pct: float = Field(default=0.50)
 
-    # --- gitlab (kilo_diff auto-commit) ------------------------------------
+    # --- gitlab (kilo_diff bot branch + merge request) ---------------------
     gitlab_api_url: str = Field(default="https://gitlab.andrea-house.com/api/v4")
     gitlab_project_id: int = Field(default=54)
     gitlab_project_path: str = Field(default="root/model-pricing")

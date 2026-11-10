@@ -39,6 +39,9 @@ def _mocks(
         "branch": mock.get(f"{PROJECT}/repository/branches/bot%2Fkilo-plans-abcdef123456").mock(
             return_value=httpx.Response(200 if branch_exists else 404, json={})
         ),
+        "delete": mock.delete(f"{PROJECT}/repository/branches/bot%2Fkilo-plans-abcdef123456").mock(
+            return_value=httpx.Response(204)
+        ),
         "commit": mock.post(f"{PROJECT}/repository/commits").mock(
             return_value=httpx.Response(201, json={"id": "c0ffee"})
         ),
@@ -82,15 +85,47 @@ async def test_open_mr_for_same_hash_is_reused_not_duplicated() -> None:
     assert not routes["mr_create"].called
 
 
-async def test_existing_branch_without_mr_opens_mr_without_recommitting() -> None:
-    """A previous run committed but failed before opening the MR."""
+async def test_propose_existing_branch_closed_mr_does_not_reuse_stale_commit() -> None:
+    """A branch with no open MR (closed MR, branch not removed) holds a commit cut
+    from an old main. It must be deleted and recreated from main, not reused."""
     with respx.mock(assert_all_called=False) as mock:
         routes = _mocks(mock, open_mrs=[], branch_exists=True)
         result = await _propose()
+        sequence = [(c.request.method, c.request.url.path) for c in mock.calls]
 
     assert result.created is True
-    assert not routes["commit"].called
+    assert routes["delete"].called
+    commit_body = json.loads(routes["commit"].calls.last.request.content)
+    assert commit_body["branch"] == BRANCH
+    assert commit_body["start_branch"] == "main"
     assert routes["mr_create"].called
+    # Order: delete the stale branch, then recreate it, then open the MR.
+    methods = [m for m, _ in sequence if m in ("DELETE", "POST")]
+    assert methods == ["DELETE", "POST", "POST"]
+    delete_at = next(i for i, (m, _) in enumerate(sequence) if m == "DELETE")
+    commit_at = next(
+        i for i, (m, p) in enumerate(sequence) if m == "POST" and p.endswith("/commits")
+    )
+    assert delete_at < commit_at
+
+
+async def test_commit_ok_mr_create_500_raises() -> None:
+    with respx.mock(assert_all_called=False) as mock:
+        routes = _mocks(mock, open_mrs=[], branch_exists=False)
+        routes["mr_create"].mock(return_value=httpx.Response(500, json={"message": "boom"}))
+        with pytest.raises(httpx.HTTPStatusError):
+            await _propose()
+    assert routes["commit"].called
+
+
+async def test_gitlab_token_empty_fails_fast(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(gitlab_commit._settings, "gitlab_token", "", raising=False)
+    with respx.mock(assert_all_called=False) as mock:
+        routes = _mocks(mock, open_mrs=[], branch_exists=False)
+        with pytest.raises(RuntimeError, match="GITLAB_TOKEN"):
+            await _propose()
+        assert not mock.calls
+    assert not any(r.called for r in routes.values())
 
 
 def _plan() -> KiloPlan:
@@ -173,6 +208,29 @@ async def test_smtp_error_after_mr_still_records_hash(monkeypatch: pytest.Monkey
     assert rc == 0
     # Recorded BEFORE the mail was attempted, and the failure did not undo it.
     assert events == ["record:abcdef1234567890", "mail"]
+
+
+async def test_commit_ok_mr_create_500_does_not_record_hash(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Through the real GitLab client: the commit lands, the MR call 500s, the
+    job exits 1 and the baseline hash is NOT recorded (so the next run retries)."""
+    events: list[str] = []
+    _stub_extraction(monkeypatch, {"pro": {"monthly_usd": {"old": 40, "new": 49}}})
+    monkeypatch.setattr(kilo_diff, "propose_file_change", gitlab_commit.propose_file_change)
+
+    async def _send(subject: str, html: str, text: str) -> bool:
+        events.append("mail")
+        return True
+
+    with respx.mock(assert_all_called=False) as mock:
+        routes = _mocks(mock, open_mrs=[], branch_exists=False)
+        routes["mr_create"].mock(return_value=httpx.Response(500, json={}))
+        rc = await _run_main(monkeypatch, _send, events)
+
+    assert rc == 1
+    assert routes["commit"].called
+    assert events == []
 
 
 async def test_mr_failure_does_not_record_and_exits_nonzero(

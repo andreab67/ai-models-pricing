@@ -2,7 +2,6 @@ stages:
   - lint
   - sast
   - build
-  - scan
   - test
   - deploy
 
@@ -174,7 +173,10 @@ build:web:
     - main
 
 # Blocking scans of the images that deploy:k8s ships (the SHA-tagged build
-# output, not the upstream base images the sast jobs above look at).
+# output, not the upstream base images the sast jobs above look at). They sit
+# in the `test` stage (needs: the build) so they run in parallel with test:*;
+# a separate stage would make every test job wait for the scans, and an MR
+# author would get no test results while a scan is red.
 # - HIGH/CRITICAL fail the job (exit 1). --ignore-unfixed skips findings that
 #   have no upstream fix yet: nothing can be done about those and failing the
 #   deploy on them would just freeze it.
@@ -184,7 +186,7 @@ build:web:
 #   mirrors the kaniko --skip-tls-verify push in build:*: the registry cert is
 #   not in this image's trust store.
 scan:api-image-trivy:
-  stage: scan
+  stage: test
   tags: [k8s]
   image:
     name: aquasec/trivy:latest
@@ -201,7 +203,7 @@ scan:api-image-trivy:
     - main
 
 scan:web-image-trivy:
-  stage: scan
+  stage: test
   tags: [k8s]
   image:
     name: aquasec/trivy:latest

@@ -183,19 +183,82 @@ def test_gitlab_token_is_not_anywhere_else_in_the_manifests() -> None:
         assert "GITLAB_TOKEN" not in path.read_text(), path.name
 
 
-def test_each_workload_gets_only_the_keys_it_uses() -> None:
-    expected = {
-        "web": set(),
-        "daily-report": {"REDIS_URL", "OPENROUTER_API_KEY", "KILO_TIER"},
-        "refresh-pricing": {"DATABASE_URL", "REDIS_URL", "OPENROUTER_API_KEY"},
-        "kilo-diff": {"DATABASE_URL", "REDIS_URL", "OPENROUTER_API_KEY", "GITLAB_TOKEN"},
+def _refs_by_container(pod: dict[str, Any]) -> dict[str, dict[str, bool]]:
+    """container name -> {secret key: optional?} for model-pricing-secrets."""
+    out: dict[str, dict[str, bool]] = {}
+    for c in [*pod.get("initContainers", []), *pod["containers"]]:
+        refs = {}
+        for e in c.get("env", []):
+            ref = (e.get("valueFrom") or {}).get("secretKeyRef")
+            if ref and ref["name"] == SECRET:
+                refs[ref["key"]] = bool(ref.get("optional", False))
+        out[c["name"]] = refs
+    return out
+
+
+EXPECTED_KEYS: dict[tuple[str, str], set[str]] = {
+    ("api", "migrate"): {"DATABASE_URL"},
+    ("api", "api"): {
+        "DATABASE_URL",
+        "REDIS_URL",
+        "OPENROUTER_API_KEY",
+        "OPENROUTER_ADMIN_KEY",
+        "KILO_API_KEY",
+        "KILO_TIER",
+        "MINIMAX_API_KEY",
+        "DEEPSEEK_API_KEY",
+    },
+    ("refresh-pricing", "refresh"): {"DATABASE_URL", "REDIS_URL", "OPENROUTER_API_KEY"},
+    ("daily-report", "report"): {"REDIS_URL", "OPENROUTER_API_KEY", "KILO_TIER"},
+    ("kilo-diff", "diff"): {"DATABASE_URL", "REDIS_URL", "OPENROUTER_API_KEY", "GITLAB_TOKEN"},
+}
+
+
+def test_each_container_gets_exactly_the_keys_it_uses() -> None:
+    got = {
+        (name, container): set(refs)
+        for name, pod in _workloads(K8S_BASE)
+        for container, refs in _refs_by_container(pod).items()
+        if refs
     }
-    got = {n: _secret_keys(p) for n, p in _workloads(K8S_BASE)}
-    for name, keys in expected.items():
-        assert got[name] == keys, name
-    # api: every account/dashboard key, but never the GitLab token.
-    assert "DATABASE_URL" in got["api"]
-    assert "GITLAB_TOKEN" not in got["api"]
+    assert got == EXPECTED_KEYS
+    # web mounts nothing from the Secret at all.
+    web = dict(_workloads(K8S_BASE))["web"]
+    assert all(not refs for refs in _refs_by_container(web).values())
+
+
+def test_only_database_url_and_gitlab_token_are_required() -> None:
+    required = {
+        (name, container, key)
+        for name, pod in _workloads(K8S_BASE)
+        for container, refs in _refs_by_container(pod).items()
+        for key, optional in refs.items()
+        if not optional
+    }
+    assert {key for _, _, key in required} == {"DATABASE_URL", "GITLAB_TOKEN"}
+    assert {(n, c) for n, c, k in required if k == "GITLAB_TOKEN"} == {("kilo-diff", "diff")}
+
+
+def test_scan_jobs_do_not_gate_the_test_jobs(ci: dict[str, Any]) -> None:
+    """Scans run beside test:*, not in an earlier stage the tests would wait on."""
+    stages = ci["stages"]
+    assert "scan" not in stages
+    for job in ("scan:api-image-trivy", "scan:web-image-trivy"):
+        assert ci[job]["stage"] == ci["test:api"]["stage"]
+
+
+def test_api_runtime_removes_pip_by_exact_path_not_a_glob() -> None:
+    runtime = (REPO / "api" / "Dockerfile").read_text().split("AS runtime", 1)[1]
+    assert "site-packages/pip*" not in runtime
+    assert "site-packages/setuptools*" not in runtime
+    for exact in (
+        "site-packages/pip \\",
+        "site-packages/pip-*.dist-info",
+        "site-packages/setuptools \\",
+        "site-packages/setuptools-*.dist-info",
+        "site-packages/wheel \\",
+    ):
+        assert exact in runtime, exact
 
 
 @pytest.mark.skipif(shutil.which("kubectl") is None, reason="kubectl not installed")

@@ -146,6 +146,14 @@ async def fetch_models() -> list[ModelPricing]:
                 normalized.append(m)
             if unpriced:
                 log.info("kilo_models_dropped_unpriced", dropped=unpriced, kept=len(normalized))
+            if data and not normalized:
+                # Kilo answered with records but none is usable (for example it
+                # changed its pricing shape). Returning [] would be a 200 that
+                # empties model-speed's pool, exactly the 2026-09-18 failure
+                # mode; surface it as unavailable instead.
+                raise KiloUnavailable(
+                    f"Kilo returned {len(data)} records but none had a usable price"
+                )
             if skipped:
                 log.warning("kilo_models_records_skipped", skipped=skipped, total=len(data))
             if normalized:
@@ -156,6 +164,9 @@ async def fetch_models() -> list[ModelPricing]:
                 )
             log.info("kilo_models_fetch_ok", count=len(normalized))
             return normalized
+        except KiloUnavailable as exc:
+            log.error("kilo_models_unusable", error=str(exc), base_url=_BASE_URL)
+            raise
         except Exception as exc:
             log.error("kilo_models_fetch_failed", error=str(exc), base_url=_BASE_URL)
             raise KiloUnavailable(f"Kilo gateway unavailable: {exc}") from exc
