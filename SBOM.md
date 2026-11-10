@@ -89,7 +89,7 @@ Critical dependencies are pinned in lock files:
 ## Security Considerations
 
 - All dependencies are regularly scanned via Trivy
-- Known CVEs are suppressed only with documented justification (see `.trivyignore`)
+- The blocking `scan:*-image-trivy` jobs run on every built image; a CVE may be suppressed only with a documented justification (`--ignorefile`). None is suppressed today: the web runner stage ships no npm/corepack/yarn and the api runtime stage ships no pip/setuptools
 - No pre-built binaries are committed to version control
 - All build artifacts are generated at build-time in CI/CD
 

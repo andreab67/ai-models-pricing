@@ -86,13 +86,34 @@ def test_image_scans_are_blocking_and_scan_the_sha_tagged_image(
     assert set(ci["deploy:k8s"]["only"]) <= set(spec["only"])
 
 
-def test_web_scan_uses_the_trivyignore_file(ci: dict[str, Any]) -> None:
+def test_web_scan_ignorefile_flag_and_file_stay_in_step(ci: dict[str, Any]) -> None:
+    """The web runner ships no npm, so the scan needs no suppressions.
+
+    If a suppression is ever re-added, the flag and the file must come
+    together (a flag without a file, or a file nothing reads, is a silent gap).
+    """
     script = "\n".join(ci["scan:web-image-trivy"]["script"])
-    assert "--ignorefile web/.trivyignore" in script
-    assert TRIVYIGNORE.exists()
+    assert ("--ignorefile web/.trivyignore" in script) == TRIVYIGNORE.exists()
+
+
+def test_web_runner_stage_drops_npm_corepack_and_yarn() -> None:
+    dockerfile = (REPO / "web" / "Dockerfile").read_text()
+    runner = dockerfile.split("AS runner", 1)[1]
+    for needle in ("node_modules/npm", "node_modules/corepack", "/opt/yarn", "bin/npx"):
+        assert needle in runner, needle
+    # Only the final stage is stripped: the builder stages still need npm.
+    assert "rm -rf /usr/local/lib/node_modules/npm" not in dockerfile.split("AS runner", 1)[0]
+
+
+def test_api_runtime_stage_removes_pip_and_setuptools_and_upgrades_zlib() -> None:
+    runtime = (REPO / "api" / "Dockerfile").read_text().split("AS runtime", 1)[1]
+    assert "pip uninstall -y pip setuptools" in runtime
+    assert "--only-upgrade zlib1g" in runtime
 
 
 def test_trivyignore_entries_each_have_a_reason_and_a_valid_id() -> None:
+    if not TRIVYIGNORE.exists():
+        pytest.skip("no suppressions")
     lines = TRIVYIGNORE.read_text().splitlines()
     entries = 0
     for i, line in enumerate(lines):

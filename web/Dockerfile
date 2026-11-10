@@ -29,6 +29,15 @@ ENV NODE_ENV=production \
 COPY --from=builder --chown=node:node /app/.next/standalone ./
 COPY --from=builder --chown=node:node /app/.next/static ./.next/static
 COPY --from=builder --chown=node:node /app/public ./public
+
+# The runner only executes `node server.js`. The base image's npm, corepack
+# and yarn (and their bundled dependencies) are never run here but are scanned
+# by trivy, so drop them: the deploy gate then reports only what actually ships.
+# The deps/builder stages above keep npm.
+RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack \
+        /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack \
+        /opt/yarn* /usr/local/bin/yarn /usr/local/bin/yarnpkg
+
 USER 1000:1000
 
 EXPOSE 3000

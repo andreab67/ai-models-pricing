@@ -212,8 +212,7 @@ scan:web-image-trivy:
     TRIVY_PASSWORD: "$CI_REGISTRY_PASSWORD"
     TRIVY_NO_PROGRESS: "true"
   script:
-    # web/.trivyignore holds the reviewed suppressions (reason above each id).
-    - trivy image --insecure --image-src remote --severity HIGH,CRITICAL --ignore-unfixed --ignorefile web/.trivyignore --exit-code 1 "${IMAGE_WEB}:${CI_COMMIT_SHORT_SHA}"
+    - trivy image --insecure --image-src remote --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 "${IMAGE_WEB}:${CI_COMMIT_SHORT_SHA}"
   only:
     - merge_requests
     - main
