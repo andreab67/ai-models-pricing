@@ -27,16 +27,34 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1
 
 # UID/GID 1000 matches the pods' securityContext (runAsUser/runAsGroup 1000).
+# --only-upgrade zlib1g: pick up the fixed zlib1g even when the base image is
+# older than the Debian security update (trivy gate: HIGH CVEs with a fix).
 RUN apt-get update && apt-get install -y --no-install-recommends \
         curl \
+    && apt-get install -y --only-upgrade zlib1g \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --gid 1000 app \
     && useradd --uid 1000 --gid 1000 --no-create-home --home-dir /app app
 
 WORKDIR /app
 COPY --from=builder /wheels /wheels
+# pip and setuptools are not needed at run time (uvicorn, alembic and the
+# CronJobs are plain `python -m ...` entrypoints) and the base image's vendored
+# copies (msgpack, urllib3, setuptools) carry HIGH CVEs, so remove them once the
+# app deps are installed.
 RUN pip install --no-index --find-links=/wheels /wheels/*.whl \
-    && rm -rf /wheels
+    && rm -rf /wheels \
+    && python -m pip uninstall -y pip setuptools wheel \
+    && rm -rf /usr/local/lib/python3*/site-packages/pip \
+              /usr/local/lib/python3*/site-packages/pip-*.dist-info \
+              /usr/local/lib/python3*/site-packages/setuptools \
+              /usr/local/lib/python3*/site-packages/setuptools-*.dist-info \
+              /usr/local/lib/python3*/site-packages/wheel \
+              /usr/local/lib/python3*/site-packages/wheel-*.dist-info \
+              /usr/local/lib/python3*/site-packages/pkg_resources \
+              /usr/local/lib/python3*/site-packages/_distutils_hack \
+              /usr/local/lib/python3*/site-packages/distutils-precedence.pth \
+              /usr/local/lib/python3*/ensurepip/_bundled
 
 COPY --chown=app:app . /app
 

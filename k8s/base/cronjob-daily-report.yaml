@@ -25,8 +25,17 @@ spec:
               command: ["python", "-m", "app.jobs.daily_report"]
               envFrom:
                 - configMapRef: { name: model-pricing-config }
-                - secretRef:    { name: model-pricing-secrets }
                 - secretRef:    { name: ses-creds }
+              env:
+                - name: REDIS_URL
+                  valueFrom:
+                    secretKeyRef: { name: model-pricing-secrets, key: REDIS_URL, optional: true }
+                - name: OPENROUTER_API_KEY
+                  valueFrom:
+                    secretKeyRef: { name: model-pricing-secrets, key: OPENROUTER_API_KEY, optional: true }
+                - name: KILO_TIER
+                  valueFrom:
+                    secretKeyRef: { name: model-pricing-secrets, key: KILO_TIER, optional: true }
               resources:
                 requests: { cpu: 50m,  memory: 128Mi }
                 limits:   { cpu: 500m, memory: 384Mi }

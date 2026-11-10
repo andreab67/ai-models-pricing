@@ -6,6 +6,7 @@ OpenAI-compatible and uses the same model-id/pricing format as OpenRouter.
 
 from __future__ import annotations
 
+import math
 from datetime import UTC, datetime
 from typing import Any
 
@@ -35,14 +36,31 @@ class KiloUnavailable(RuntimeError):
     """
 
 
-def _to_mtok(per_token: str | float | None) -> float:
-    """Convert per-token decimal string to USD per 1M tokens."""
-    if per_token is None or per_token == "":
-        return 0.0
+def _to_mtok(per_token: str | float | None) -> float | None:
+    """Convert per-token decimal string to USD per 1M tokens.
+
+    Returns None for a price that is missing, empty, unparseable, non-finite
+    (NaN/inf) or negative: an unknown price must not be published as 0.0 (free).
+    An explicit "0" is a real price and is kept.
+    """
+    if per_token is None or isinstance(per_token, bool) or per_token == "":
+        return None
     try:
-        return float(per_token) * 1_000_000
+        mtok = float(per_token) * 1_000_000
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(mtok) or mtok < 0:
+        return None
+    return mtok
+
+
+def _float_or_zero(value: Any) -> float:
+    """Optional surcharge fields: absent or unusable means 0, never NaN/inf/negative."""
+    try:
+        parsed = float(value or 0)
     except (TypeError, ValueError):
         return 0.0
+    return parsed if math.isfinite(parsed) and parsed >= 0 else 0.0
 
 
 def _normalize(raw: dict[str, Any]) -> ModelPricing | None:
@@ -52,7 +70,10 @@ def _normalize(raw: dict[str, Any]) -> ModelPricing | None:
     prompt = _to_mtok(pricing.get("prompt"))
     completion = _to_mtok(pricing.get("completion"))
 
-    if prompt < 0 or completion < 0:
+    # Unknown price: drop the record. ModelPricing requires numeric prices and
+    # its consumers (ranker, comparison, web) treat them as real, so a 0.0 here
+    # would rank and probe the model as free.
+    if prompt is None or completion is None:
         return None
 
     model_id = raw.get("id")
@@ -68,8 +89,8 @@ def _normalize(raw: dict[str, Any]) -> ModelPricing | None:
         provider=provider,
         prompt_usd_per_mtok=round(prompt, 4),
         completion_usd_per_mtok=round(completion, 4),
-        request_usd=float(pricing.get("request") or 0),
-        image_usd=float(pricing.get("image") or 0),
+        request_usd=_float_or_zero(pricing.get("request")),
+        image_usd=_float_or_zero(pricing.get("image")),
         context_length=raw.get("context_length"),
         max_completion_tokens=(raw.get("top_provider") or {}).get("max_completion_tokens"),
         supports_tools="tools" in (raw.get("supported_parameters") or []),
@@ -112,14 +133,27 @@ async def fetch_models() -> list[ModelPricing]:
             # guard model-speed already has in _normalize_pricing_api.
             normalized: list[ModelPricing] = []
             skipped = 0
+            unpriced = 0
             for r in data:
                 try:
                     m = _normalize(r)
                 except (TypeError, ValueError, AttributeError):
                     skipped += 1
                     continue
-                if m is not None:
-                    normalized.append(m)
+                if m is None:
+                    unpriced += 1
+                    continue
+                normalized.append(m)
+            if unpriced:
+                log.info("kilo_models_dropped_unpriced", dropped=unpriced, kept=len(normalized))
+            if data and not normalized:
+                # Kilo answered with records but none is usable (for example it
+                # changed its pricing shape). Returning [] would be a 200 that
+                # empties model-speed's pool, exactly the 2026-09-18 failure
+                # mode; surface it as unavailable instead.
+                raise KiloUnavailable(
+                    f"Kilo returned {len(data)} records but none had a usable price"
+                )
             if skipped:
                 log.warning("kilo_models_records_skipped", skipped=skipped, total=len(data))
             if normalized:
@@ -130,6 +164,9 @@ async def fetch_models() -> list[ModelPricing]:
                 )
             log.info("kilo_models_fetch_ok", count=len(normalized))
             return normalized
+        except KiloUnavailable as exc:
+            log.error("kilo_models_unusable", error=str(exc), base_url=_BASE_URL)
+            raise
         except Exception as exc:
             log.error("kilo_models_fetch_failed", error=str(exc), base_url=_BASE_URL)
             raise KiloUnavailable(f"Kilo gateway unavailable: {exc}") from exc

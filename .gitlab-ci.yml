@@ -172,6 +172,53 @@ build:web:
     - merge_requests
     - main
 
+# Blocking scans of the images that deploy:k8s ships (the SHA-tagged build
+# output, not the upstream base images the sast jobs above look at). They sit
+# in the `test` stage (needs: the build) so they run in parallel with test:*;
+# a separate stage would make every test job wait for the scans, and an MR
+# author would get no test results while a scan is red.
+# - HIGH/CRITICAL fail the job (exit 1). --ignore-unfixed skips findings that
+#   have no upstream fix yet: nothing can be done about those and failing the
+#   deploy on them would just freeze it.
+# - --image-src remote pulls from the registry, so the job can never fall back
+#   to a stale copy in a local docker store. The registry is reached with the
+#   job's own CI credentials (TRIVY_USERNAME/TRIVY_PASSWORD). --insecure
+#   mirrors the kaniko --skip-tls-verify push in build:*: the registry cert is
+#   not in this image's trust store.
+scan:api-image-trivy:
+  stage: test
+  tags: [k8s]
+  image:
+    name: aquasec/trivy:latest
+    entrypoint: [""]
+  needs: [build:api]
+  variables:
+    TRIVY_USERNAME: "$CI_REGISTRY_USER"
+    TRIVY_PASSWORD: "$CI_REGISTRY_PASSWORD"
+    TRIVY_NO_PROGRESS: "true"
+  script:
+    - trivy image --insecure --image-src remote --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 "${IMAGE_API}:${CI_COMMIT_SHORT_SHA}"
+  only:
+    - merge_requests
+    - main
+
+scan:web-image-trivy:
+  stage: test
+  tags: [k8s]
+  image:
+    name: aquasec/trivy:latest
+    entrypoint: [""]
+  needs: [build:web]
+  variables:
+    TRIVY_USERNAME: "$CI_REGISTRY_USER"
+    TRIVY_PASSWORD: "$CI_REGISTRY_PASSWORD"
+    TRIVY_NO_PROGRESS: "true"
+  script:
+    - trivy image --insecure --image-src remote --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 "${IMAGE_WEB}:${CI_COMMIT_SHORT_SHA}"
+  only:
+    - merge_requests
+    - main
+
 test:db-migrations:
   stage: test
   tags: [k8s]
@@ -200,20 +247,29 @@ test:db-migrations:
 # `environment: production` block makes the production context visible
 # alongside the job.
 #
-# `needs` must list every `test` stage job as well as the two builds. `needs`
-# overrides stage ordering, so listing only the builds would let the deploy
-# start the moment they finish — racing, and usually beating, the checks in
-# the earlier `test` stage. That is harmless behind a manual gate (an operator
-# reads the pipeline before clicking) but not on an automatic one, where it
-# would ship a schema change, or a failing test suite, that nothing validated.
-# Add any new `test` stage job here too.
+# `needs` must list every lint, scan and `test` stage job as well as the two
+# builds. `needs` overrides stage ordering, so listing only the builds would
+# let the deploy start the moment they finish - racing, and usually beating,
+# the checks in the other stages. That is harmless behind a manual gate (an
+# operator reads the pipeline before clicking) but not on an automatic one,
+# where it would ship a schema change, a failing test suite, a lint failure or
+# an image with a HIGH/CRITICAL finding that nothing validated. None of these
+# jobs may carry allow_failure. Add any new lint/scan/test job here too.
 deploy:k8s:
   stage: deploy
   tags: [k8s]
   image:
     name: bitnami/kubectl:latest
     entrypoint: [""]
-  needs: [build:api, build:web, test:db-migrations, test:api]
+  needs:
+    - build:api
+    - build:web
+    - lint:web
+    - lint:api
+    - scan:api-image-trivy
+    - scan:web-image-trivy
+    - test:db-migrations
+    - test:api
   environment:
     name: production
     url: https://models.andrea-house.com

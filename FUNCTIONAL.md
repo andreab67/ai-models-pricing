@@ -40,7 +40,7 @@ Compare the same model across five purchasing channels:
 - **Kept in sync automatically**: the weekly `kilo-diff` job detects changes to kilo.ai/pricing and updates the yaml (see Scheduled Jobs)
 - **Streak bonuses**: Month 1 gets the welcome bonus. Month n ≥ 2 gets `min(step_pct × n, cap)`, where `cap` is the plan's own `max_bonus_pct` and never exceeds the global `cap_pct` (40% by month 8 today)
 - **Annual prepayment**: Flat annual bonus per month
-- **Live model availability**: Kilo's gateway catalog. If the gateway is unreachable the endpoints answer **503**, not an empty list
+- **Live model availability**: Kilo's gateway catalog. If the gateway is unreachable the endpoints answer **503**, not an empty list. A catalog record whose prompt or completion price is missing, empty, unparseable, NaN/inf or negative is dropped (an explicit `0` is a real free price), so a record with no pricing block is never published, or probed by model-speed, as free
 - **Projection calculator**: Effective credits for a tier, streak and billing mode
 
 ### 5. Account Balance & Usage
@@ -328,6 +328,7 @@ The browser calls `/api/*` on the web origin. A Next.js route handler reads `API
 - **Schedule**: Every 5 minutes (`*/5 * * * *`), matching `OPENROUTER_REFRESH_SECONDS=300` in the shipped config
 - **Action**: Fetch OpenRouter `/models`, normalize (a malformed record is skipped, not fatal), update the Redis cache, write one batched hourly snapshot to Postgres, and prune snapshots older than `SNAPSHOT_RETENTION_DAYS`
 - **Failure handling**: The fetch retries up to 3 times with exponential backoff. A failed run exits non-zero and the Job retries (`backoffLimit: 4`)
+- **Bad data is rejected, not stored**: a record whose prompt or completion price is missing, unparseable, NaN/inf or negative is dropped (an explicit `0` is a real free price); optional `request`/`image` surcharges that are unusable become 0, never NaN. A catalog with no usable models, or one that shrank below 50% of the models already cached, raises `CatalogRejectedError` (the run exits non-zero) and leaves the previous cache and the snapshots untouched. The shrink check needs a previous cache entry (it lives 3x the refresh interval). The `/models` body is read as a stream and refused above `OPENROUTER_MAX_RESPONSE_BYTES` (default 10 MiB, decompressed), without retries
 
 ### daily-report
 - **Schedule**: Daily at 08:00 America/Denver (`spec.timeZone`)
@@ -339,9 +340,9 @@ The browser calls `/api/*` on the web origin. A Next.js route handler reads `API
 - **Action**: Hash the visible text of kilo.ai/pricing and compare it with the last hash stored in Postgres (`kilo_plan_snapshot`, not Redis). On a change:
   1. Extract the per-tier figures with an LLM (`KILO_EXTRACTION_MODEL`)
   2. Sanity-check them against the current yaml (`KILO_SANITY_MAX_DELTA_PCT`)
-  3. If they pass and actually differ, commit the updated `kilo_plans.yaml` to `main` through the GitLab API; CI then builds and deploys it, and an FYI email is sent
+  3. If they pass and actually differ, commit the updated `kilo_plans.yaml` to a bot branch `bot/kilo-plans-<first 12 chars of the page hash>` (cut from `main` through the GitLab Commits API) and open a merge request to `main` assigned to user id 2 (`GITLAB_MR_ASSIGNEE_ID`). Nothing reaches `main` until that MR is reviewed and merged; CI then builds and deploys it. If an open MR for the same hash already exists no second one is opened, and an existing branch without an MR is not committed to again. An FYI email links the MR
   4. If extraction fails or looks implausible, email a manual-review alert instead
-- **Baseline**: The new hash is recorded only after the change was handled. If the GitLab commit fails, or the manual-review alert cannot be delivered (SMTP not configured), the job exits non-zero and keeps the old baseline, so the change is retried on the next run. The first run after deploy records a baseline and cannot detect a change
+- **Baseline**: The new hash is recorded only after the change was handled, and immediately after the MR is opened, before the FYI mail. If the GitLab commit or MR call fails, or the manual-review alert cannot be delivered (SMTP not configured), the job exits non-zero and keeps the old baseline, so the change is retried on the next run. A failing FYI mail is logged and does not fail the job. Every interpolated field in the mails is HTML-escaped. The first run after deploy records a baseline and cannot detect a change
 
 ## Environment Configuration
 
@@ -358,7 +359,7 @@ The browser calls `/api/*` on the web origin. A Next.js route handler reads `API
 - `KILO_BASE_URL`: Kilo gateway host (default `https://api.kilo.ai/api/gateway`); an env override for riding out a gateway outage
 - `KILO_TIER`: Active Kilo tier, `starter` / `pro` / `expert` (case-insensitive, default `starter`). Any other value fails at startup
 - `KILO_EXTRACTION_MODEL`, `KILO_SANITY_MAX_DELTA_PCT`: kilo-diff extraction model and plausibility bound. The model default is the OpenRouter slug `anthropic/claude-haiku-5.5` (the native Anthropic id `claude-haiku-5-5` is not valid there). The request sends no sampling parameters, because Haiku 5.5 rejects non-default `temperature`; an empty reply (thinking can use the whole token budget) fails the extraction with the `finish_reason` and triggers the manual-review email instead of a commit
-- `GITLAB_TOKEN`, `GITLAB_API_URL`, `GITLAB_PROJECT_ID`, `GITLAB_PROJECT_PATH`: kilo-diff auto-commit target
+- `GITLAB_TOKEN`, `GITLAB_API_URL`, `GITLAB_PROJECT_ID`, `GITLAB_PROJECT_PATH`, `GITLAB_MR_ASSIGNEE_ID`: kilo-diff bot branch and merge request target. The token needs the `api` scope (Commits and Merge Requests APIs) and is mounted into the kilo-diff CronJob only
 - `SMTP_*`: Email for the daily report and kilo-diff alerts
 
 ### Web
