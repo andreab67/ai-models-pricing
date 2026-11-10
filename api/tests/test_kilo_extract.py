@@ -281,12 +281,12 @@ async def test_empty_extraction_response_is_a_manual_review_not_a_commit(
     async def _email(old_hash: str, new_hash: str, reason: str) -> None:
         emails.append(reason)
 
-    async def _commit(path: str, content: str, message: str) -> str:
-        commits.append(path)
+    async def _commit(*args: object, **kwargs: object) -> str:
+        commits.append("called")
         return "url"
 
     monkeypatch.setattr(kilo_diff, "_send_manual_review_email", _email)
-    monkeypatch.setattr(kilo_diff, "commit_file", _commit)
+    monkeypatch.setattr(kilo_diff, "propose_file_change", _commit)
 
     assert await kilo_diff._handle_change("old", "new", "page text") is None
     assert commits == []

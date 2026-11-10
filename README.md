@@ -173,7 +173,12 @@ See `FUNCTIONAL.md` for complete endpoint documentation and response schemas.
 - Kubernetes secret `model-pricing-secrets` with:
   - `DATABASE_URL` — PostgreSQL connection string
   - `REDIS_URL` — Redis endpoint
-  - API keys (optional): `OPENAI_ADMIN_KEY`, `ANTHROPIC_ADMIN_KEY`, `KILO_API_KEY`
+  - API keys (optional): `OPENROUTER_API_KEY`, `OPENROUTER_ADMIN_KEY`, `KILO_API_KEY`, `MINIMAX_API_KEY`, `DEEPSEEK_API_KEY`, `KILO_TIER`
+  - `GITLAB_TOKEN` — used only by the `kilo-diff` CronJob (pushes a bot branch and opens a merge request)
+
+  No workload loads this Secret with `envFrom`: each Deployment and CronJob lists the keys it needs as
+  `env.valueFrom.secretKeyRef` entries (see `k8s/base/secret.example.yaml` for the key-to-workload map).
+  `k8s/` is pinned by `api/tests/test_deploy_gates.py`.
 
 ### Deploy
 

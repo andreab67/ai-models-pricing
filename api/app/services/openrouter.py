@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from urllib.parse import urlsplit
@@ -45,6 +46,21 @@ _inflight_refresh: asyncio.Task[list[ModelPricing]] | None = None
 # Bound concurrent endpoint requests during speed enrichment — one call per model.
 _SPEED_CONCURRENCY = 8
 
+# A refresh whose normalized catalog is smaller than this fraction of the
+# catalog already cached (i.e. it shrank by more than half) is treated as an
+# upstream fault and rejected; the previous cache is left untouched. The real
+# catalog moves by a handful of models at a time. Only applies while a previous
+# cache entry exists (it lives 3x the refresh interval).
+MIN_CATALOG_RATIO = 0.5
+
+
+class ResponseTooLargeError(ValueError):
+    """The /models response exceeded ``openrouter_max_response_bytes``."""
+
+
+class CatalogRejectedError(RuntimeError):
+    """The fetched catalog is empty or shrank sharply; the old cache is kept."""
+
 
 # Allowlist of hosts we will attach the OpenRouter bearer token to. This blocks
 # SSRF-via-catalog: if a model's `links.details` URL is hijacked to an
@@ -78,21 +94,31 @@ def _auth_headers() -> dict[str, str]:
     return {"Authorization": f"Bearer {key}"} if key else {}
 
 
-def _to_mtok(per_token: str | float | None) -> float:
-    """Convert OpenRouter's per-token decimal string to USD per 1M tokens."""
-    if per_token is None or per_token == "":
-        return 0.0
+def _to_mtok(per_token: str | float | None) -> float | None:
+    """Convert OpenRouter's per-token decimal string to USD per 1M tokens.
+
+    Returns None for a price that is missing, unparseable, non-finite (NaN/inf)
+    or negative (OpenRouter uses "-1" for routers with no fixed price). An
+    explicit "0" is a real price (free model) and is kept.
+    """
+    if per_token is None or isinstance(per_token, bool) or per_token == "":
+        return None
     try:
-        return float(per_token) * 1_000_000
+        mtok = float(per_token) * 1_000_000
     except (TypeError, ValueError):
-        return 0.0
+        return None
+    if not math.isfinite(mtok) or mtok < 0:
+        return None
+    return mtok
 
 
 def _float_or_zero(value: Any) -> float:
+    """Optional surcharge fields: absent or unusable means 0, never NaN/inf/negative."""
     try:
-        return float(value or 0)
+        parsed = float(value or 0)
     except (TypeError, ValueError):
         return 0.0
+    return parsed if math.isfinite(parsed) and parsed >= 0 else 0.0
 
 
 def _normalize(raw_model: dict[str, Any]) -> ModelPricing | None:
@@ -103,7 +129,9 @@ def _normalize(raw_model: dict[str, Any]) -> ModelPricing | None:
     prompt = _to_mtok(pricing.get("prompt"))
     completion = _to_mtok(pricing.get("completion"))
 
-    if prompt < 0 or completion < 0:
+    # A record without a usable prompt AND completion price is dropped rather
+    # than stored as 0.0: a 0 would rank as the cheapest model in the catalog.
+    if prompt is None or completion is None:
         return None
 
     model_id = raw_model.get("id")
@@ -135,6 +163,7 @@ def normalize_all(raw: list[dict[str, Any]]) -> list[ModelPricing]:
     One bad record from upstream must not abort the whole refresh.
     """
     normalized: list[ModelPricing] = []
+    rejected = 0
     for r in raw:
         try:
             m = _normalize(r)
@@ -145,9 +174,41 @@ def normalize_all(raw: list[dict[str, Any]]) -> list[ModelPricing]:
                 error=str(exc),
             )
             continue
-        if m is not None:
-            normalized.append(m)
+        if m is None:
+            rejected += 1
+            continue
+        normalized.append(m)
+    if rejected:
+        log.info("openrouter_models_rejected", rejected=rejected, kept=len(normalized))
     return normalized
+
+
+async def _reject_bad_catalog(normalized: list[ModelPricing]) -> None:
+    """Raise CatalogRejectedError if ``normalized`` must not replace the cache."""
+    if not normalized:
+        raise CatalogRejectedError(
+            "OpenRouter catalog has no usable models; keeping previous cache"
+        )
+    previous = await cache.get(CACHE_KEY)
+    previous_count = len(previous) if isinstance(previous, list) else 0
+    if previous_count and len(normalized) < previous_count * MIN_CATALOG_RATIO:
+        raise CatalogRejectedError(
+            f"OpenRouter catalog shrank from {previous_count} to {len(normalized)} models "
+            f"(below {MIN_CATALOG_RATIO:.0%}); keeping previous cache"
+        )
+
+
+async def _read_capped(resp: httpx.Response, limit: int) -> bytes:
+    """Read a streamed response body, refusing to buffer more than ``limit`` bytes."""
+    declared = resp.headers.get("content-length")
+    if declared is not None and declared.isdigit() and int(declared) > limit:
+        raise ResponseTooLargeError(f"response declares {declared} bytes (limit {limit})")
+    body = bytearray()
+    async for chunk in resp.aiter_bytes():
+        body.extend(chunk)
+        if len(body) > limit:
+            raise ResponseTooLargeError(f"response exceeds {limit} bytes")
+    return bytes(body)
 
 
 async def fetch_raw() -> list[dict[str, Any]]:
@@ -162,10 +223,11 @@ async def fetch_raw() -> list[dict[str, Any]]:
             async with httpx.AsyncClient(
                 timeout=_settings.openrouter_timeout_s, headers=_auth_headers()
             ) as client:
-                resp = await client.get(url)
-                resp.raise_for_status()
-                payload = resp.json()
-                data = payload.get("data")
+                async with client.stream("GET", url) as resp:
+                    resp.raise_for_status()
+                    body = await _read_capped(resp, _settings.openrouter_max_response_bytes)
+                payload = json.loads(body)
+                data = payload.get("data") if isinstance(payload, dict) else None
                 if not isinstance(data, list):
                     raise httpx.HTTPError("OpenRouter /models payload missing 'data' list")
                 log.info("openrouter_fetch_ok", count=len(data))
@@ -269,6 +331,7 @@ async def refresh_pricing(
     """
     raw = await fetch_raw()
     normalized = normalize_all(raw)
+    await _reject_bad_catalog(normalized)
 
     if enrich_speed:
         await enrich_speeds(normalized, raw)

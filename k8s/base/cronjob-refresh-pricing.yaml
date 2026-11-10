@@ -29,7 +29,16 @@ spec:
               command: ["python", "-m", "app.jobs.refresh_pricing"]
               envFrom:
                 - configMapRef: { name: model-pricing-config }
-                - secretRef:    { name: model-pricing-secrets }
+              env:
+                - name: DATABASE_URL
+                  valueFrom:
+                    secretKeyRef: { name: model-pricing-secrets, key: DATABASE_URL }
+                - name: REDIS_URL
+                  valueFrom:
+                    secretKeyRef: { name: model-pricing-secrets, key: REDIS_URL, optional: true }
+                - name: OPENROUTER_API_KEY
+                  valueFrom:
+                    secretKeyRef: { name: model-pricing-secrets, key: OPENROUTER_API_KEY, optional: true }
               resources:
                 requests: { cpu: 50m,  memory: 128Mi }
                 limits:   { cpu: 500m, memory: 384Mi }

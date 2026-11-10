@@ -29,6 +29,9 @@ class Settings(BaseSettings):
     openrouter_base_url: str = Field(default="https://openrouter.ai/api/v1")
     openrouter_models_path: str = Field(default="/models")
     openrouter_timeout_s: float = Field(default=15.0)
+    # Hard cap on the /models response body (decompressed bytes). The real
+    # catalog is a couple of MB; anything near this size is not a catalog.
+    openrouter_max_response_bytes: int = Field(default=10 * 1024 * 1024)
     # Expected interval between refresh-pricing runs; the models cache lives
     # 3x this long so it never expires between runs.
     openrouter_refresh_seconds: int = Field(default=900)  # 15 min
@@ -56,6 +59,8 @@ class Settings(BaseSettings):
     gitlab_project_id: int = Field(default=54)
     gitlab_project_path: str = Field(default="root/model-pricing")
     gitlab_token: str = Field(default="")
+    # User the kilo_diff merge request is assigned to (andreab on the home GitLab).
+    gitlab_mr_assignee_id: int = Field(default=2)
 
     # --- redis ------------------------------------------------------------
     redis_url: str = Field(default="redis://localhost:6379/0")
