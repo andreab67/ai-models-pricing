@@ -40,7 +40,7 @@ Compare the same model across five purchasing channels:
 - **Kept in sync automatically**: the weekly `kilo-diff` job detects changes to kilo.ai/pricing and updates the yaml (see Scheduled Jobs)
 - **Streak bonuses**: Month 1 gets the welcome bonus. Month n ≥ 2 gets `min(step_pct × n, cap)`, where `cap` is the plan's own `max_bonus_pct` and never exceeds the global `cap_pct` (40% by month 8 today)
 - **Annual prepayment**: Flat annual bonus per month
-- **Live model availability**: Kilo's gateway catalog. If the gateway is unreachable the endpoints answer **503**, not an empty list
+- **Live model availability**: Kilo's gateway catalog. If the gateway is unreachable the endpoints answer **503**, not an empty list. A catalog record whose prompt or completion price is missing, empty, unparseable, NaN/inf or negative is dropped (an explicit `0` is a real free price), so a record with no pricing block is never published, or probed by model-speed, as free
 - **Projection calculator**: Effective credits for a tier, streak and billing mode
 
 ### 5. Account Balance & Usage
