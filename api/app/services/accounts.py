@@ -103,7 +103,7 @@ async def _check_openrouter() -> AccountProviderUsage:
                 remaining_usd=round(remaining, 4) if total_credits else None,
             )
         except Exception as exc:
-            log.warning("openrouter_check_failed", error=str(exc))
+            log.warning("openrouter_check_failed", error=str(exc), exc_info=True)
             return AccountProviderUsage(
                 provider="openrouter",
                 configured=True,
@@ -137,7 +137,7 @@ async def _kilo_balance(
         if not math.isfinite(balance):
             raise ValueError(f"non-finite balance {body['balance']!r}")
     except Exception as exc:
-        log.warning("kilo_balance_failed", account=name, error=str(exc))
+        log.warning("kilo_balance_failed", account=name, error=str(exc), exc_info=True)
         return None
     return AccountBalance(
         name=name,
@@ -212,7 +212,7 @@ async def _check_kilo() -> AccountProviderUsage:
             except Exception as exc:
                 # Without the profile we cannot enumerate organizations, but
                 # the personal balance needs no org id -- still report it.
-                log.warning("kilo_profile_failed", error=str(exc))
+                log.warning("kilo_profile_failed", error=str(exc), exc_info=True)
                 profile_failed = True
 
             results = await asyncio.gather(
@@ -252,7 +252,7 @@ async def _check_kilo() -> AccountProviderUsage:
                 error=None,
             )
         except Exception as exc:
-            log.warning("kilo_check_failed", error=str(exc))
+            log.warning("kilo_check_failed", error=str(exc), exc_info=True)
             return AccountProviderUsage(
                 provider="kilo",
                 configured=True,
@@ -423,7 +423,7 @@ async def _check_minimax() -> AccountProviderUsage:
                     ),
                 )
             except Exception as exc:
-                log.warning("minimax_check_failed", url=url, error=str(exc))
+                log.warning("minimax_check_failed", url=url, error=str(exc), exc_info=True)
                 continue
 
         return AccountProviderUsage(
@@ -530,7 +530,7 @@ async def _check_deepseek() -> AccountProviderUsage:
                 warning=None if available else "balance too low for API calls",
             )
         except Exception as exc:
-            log.warning("deepseek_check_failed", error=str(exc))
+            log.warning("deepseek_check_failed", error=str(exc), exc_info=True)
             return AccountProviderUsage(
                 provider="deepseek",
                 configured=True,
@@ -934,7 +934,7 @@ async def get_activity(
         else:
             rows, truncated = await _fetch_activity_rows(key, body)
     except _ActivityError as exc:
-        log.warning("openrouter_activity_failed", error=str(exc))
+        log.warning("openrouter_activity_failed", error=str(exc), exc_info=True)
         failed = _activity_response(window, group_by, status="error", error=str(exc))
         await cache.set(cache_key, failed.model_dump(mode="json"), ttl=_FAILURE_CACHE_TTL)
         return failed

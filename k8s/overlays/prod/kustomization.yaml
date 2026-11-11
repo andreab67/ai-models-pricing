@@ -5,6 +5,6 @@ resources:
   - ../../base
 images:
   - name: gitlab.andrea-house.com:5050/root/model-pricing/api
-    newTag: latest
+    digest: sha256:0cc1c783d31ab15ce8c8506312f8ad52d31eb929e1048bd58e7cdab654d8c7cd
   - name: gitlab.andrea-house.com:5050/root/model-pricing/web
-    newTag: latest
+    digest: sha256:16405de805c353a9ca796e63b96cfff939af74b5ca27d4d8ac78920bc767fb0f

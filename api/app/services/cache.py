@@ -59,6 +59,7 @@ class Cache:
         try:
             task = asyncio.get_running_loop().create_task(closer())
         except Exception:
+            log.warning("redis_close_scheduling_failed", exc_info=True)
             return
         _background_tasks.add(task)
         task.add_done_callback(_background_tasks.discard)
@@ -95,13 +96,15 @@ class Cache:
                 if inspect.isawaitable(ping_result):
                     await ping_result
             except Exception as exc:
-                log.warning("redis_unavailable", url=self._safe_url(), error=str(exc))
+                log.warning(
+                    "redis_unavailable", url=self._safe_url(), error=str(exc), exc_info=True
+                )
                 self._next_connect_at = time.monotonic() + _RECONNECT_BACKOFF_S
                 if client is not None:
                     try:
                         await client.aclose()
-                    except Exception:  # noqa: S110 — best-effort cleanup
-                        pass
+                    except Exception:
+                        log.warning("redis_cleanup_failed", exc_info=True)
                 return None
             self._client = client
             return client
@@ -120,10 +123,12 @@ class Cache:
                     try:
                         await client.delete(key)
                     except Exception as exc:
-                        log.warning("cache_corrupt_delete_failed", key=key, error=str(exc))
+                        log.warning(
+                            "cache_corrupt_delete_failed", key=key, error=str(exc), exc_info=True
+                        )
                     return None
             except Exception as exc:
-                log.warning("redis_get_failed", key=key, error=str(exc))
+                log.warning("redis_get_failed", key=key, error=str(exc), exc_info=True)
                 self._mark_down()
 
         async with self._lock:
@@ -158,7 +163,7 @@ class Cache:
                     await client.set(key, raw, ex=ttl)
                 return
             except Exception as exc:
-                log.warning("redis_set_failed", key=key, error=str(exc))
+                log.warning("redis_set_failed", key=key, error=str(exc), exc_info=True)
                 self._mark_down()
 
         async with self._lock:
@@ -194,7 +199,7 @@ class Cache:
                 result = await result
             return bool(result)
         except Exception as exc:
-            log.warning("redis_ping_failed", error=str(exc))
+            log.warning("redis_ping_failed", error=str(exc), exc_info=True)
             self._mark_down()
             return False
 
@@ -202,8 +207,8 @@ class Cache:
         if self._client is not None:
             try:
                 await self._client.aclose()
-            except Exception:  # noqa: S110
-                pass
+            except Exception:
+                log.warning("redis_close_failed", exc_info=True)
             self._client = None
 
 

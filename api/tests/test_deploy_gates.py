@@ -6,6 +6,8 @@ loosens a gate fails here before it reaches a pipeline.
 
 from __future__ import annotations
 
+import json
+import os
 import re
 import shutil
 import subprocess
@@ -68,7 +70,7 @@ def test_gating_jobs_cannot_fail_silently(ci: dict[str, Any], job: str) -> None:
         ("scan:web-image-trivy", "IMAGE_WEB", "build:web"),
     ],
 )
-def test_image_scans_are_blocking_and_scan_the_sha_tagged_image(
+def test_image_scans_are_blocking_and_scan_the_built_image_digest(
     ci: dict[str, Any], job: str, image_var: str, build: str
 ) -> None:
     spec = ci[job]
@@ -78,7 +80,9 @@ def test_image_scans_are_blocking_and_scan_the_sha_tagged_image(
     script = "\n".join(spec["script"])
     assert "--exit-code 1" in script
     assert "HIGH,CRITICAL" in script
-    assert f"${{{image_var}}}:${{CI_COMMIT_SHORT_SHA}}" in script
+    assert f"${{{image_var}}}@${{IMAGE_DIGEST}}" in script
+    assert "--insecure" not in script
+    assert f"read-image-digest.sh {build.replace(':', '-')}" in "\n".join(spec["before_script"])
     assert "--image-src remote" in script
     assert spec["variables"]["TRIVY_USERNAME"] == "$CI_REGISTRY_USER"
     assert spec["variables"]["TRIVY_PASSWORD"] == "$CI_REGISTRY_PASSWORD"  # noqa: S105
@@ -284,3 +288,76 @@ def test_rendered_prod_overlay_has_gitlab_token_only_in_kilo_diff() -> None:
             for source in c.get("envFrom", []):
                 assert (source.get("secretRef") or {}).get("name") != SECRET
     assert holders == {"kilo-diff"}
+
+
+@pytest.mark.parametrize(
+    "producer,image_var,job",
+    [
+        ("build-api", "IMAGE_API", "scan:api-image-trivy"),
+        ("build-web", "IMAGE_WEB", "scan:web-image-trivy"),
+    ],
+)
+@pytest.mark.parametrize(
+    "case",
+    ["valid", "prefix", "nonnumeric", "repository", "commit", "missing_name", "multiple", "other"],
+)
+def test_scan_validates_metadata_before_starting_trivy(
+    tmp_path, ci, producer, image_var, job, case
+):
+    sha = "a" * 40
+    image = "gitlab.andrea-house.com:5050/root/model-pricing/" + (
+        "api" if image_var == "IMAGE_API" else "web"
+    )
+    digest = "sha256:" + "d" * 64
+    payload = {"containerimage.digest": digest, "image.name": image + ":" + sha}
+    filename = f"image-metadata-{producer}-1.json"
+    if case == "prefix":
+        filename = f"image-metadata-{producer}-other-1.json"
+    elif case == "nonnumeric":
+        filename = f"image-metadata-{producer}-bogus.json"
+    elif case == "other":
+        filename = "image-metadata-other-1.json"
+    elif case == "repository":
+        payload["image.name"] = "registry.invalid/other:" + sha
+    elif case == "commit":
+        payload["image.name"] = image + ":" + "b" * 40
+    elif case == "missing_name":
+        del payload["image.name"]
+    elif case == "multiple":
+        (tmp_path / f"image-metadata-{producer}-2.json").write_text(json.dumps(payload))
+    (tmp_path / filename).write_text(json.dumps(payload))
+    (tmp_path / "ci").symlink_to(REPO / "ci", target_is_directory=True)
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    for name, body in [
+        ("apk", "#!/bin/sh\nexit 0\n"),
+        ("trivy", '#!/bin/sh\nprintf "%s\\n" "$*" >> "$SCAN_LOG"\n'),
+    ]:
+        fake = bindir / name
+        fake.write_text(body)
+        fake.chmod(0o755)
+    scan_log = tmp_path / "scan.log"
+    env = {
+        **os.environ,
+        "PATH": f"{bindir}:{os.environ['PATH']}",
+        image_var: image,
+        "CI_COMMIT_SHA": sha,
+        "ADDITIONAL_CA_CERT_BUNDLE": "public test CA fixture",
+        "SCAN_LOG": str(scan_log),
+    }
+    spec = ci[job]
+    script = "\n".join([*spec["before_script"], *spec["script"]])
+    proc = subprocess.run(  # noqa: S603 - actual CI code, only package/network commands stubbed
+        [shutil.which("bash") or "/bin/bash", "-e", "-c", script],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if case == "valid":
+        assert proc.returncode == 0, proc.stderr
+        assert image + "@" + digest in scan_log.read_text()
+    else:
+        assert proc.returncode != 0
+        assert not scan_log.exists()

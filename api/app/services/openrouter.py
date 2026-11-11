@@ -172,6 +172,7 @@ def normalize_all(raw: list[dict[str, Any]]) -> list[ModelPricing]:
                 "openrouter_model_skipped",
                 model_id=r.get("id") if isinstance(r, dict) else None,
                 error=str(exc),
+                exc_info=True,
             )
             continue
         if m is None:

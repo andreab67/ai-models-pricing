@@ -17,7 +17,7 @@ spec:
           restartPolicy: OnFailure
           containers:
             - name: diff
-              image: gitlab.andrea-house.com:5050/root/model-pricing/api:latest
+              image: gitlab.andrea-house.com:5050/root/model-pricing/api@sha256:0cc1c783d31ab15ce8c8506312f8ad52d31eb929e1048bd58e7cdab654d8c7cd
               command: ["python", "-m", "app.jobs.kilo_diff"]
               envFrom:
                 - configMapRef: { name: model-pricing-config }

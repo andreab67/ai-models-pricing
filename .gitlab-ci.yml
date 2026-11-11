@@ -1,3 +1,8 @@
+include:
+  - project: greenyogainc/ci-templates
+    ref: 55653bdf9cbe0a67479d134b83f4d61624af0554
+    file: /container-build.yml
+
 stages:
   - lint
   - sast
@@ -12,7 +17,7 @@ variables:
 lint:web:
   stage: lint
   tags: [k8s]
-  image: node:22-alpine
+  image: node:22-alpine@sha256:0e1754758c2df4cfa3e68d59e2e1b7374bb7fd9ea6328eaaacf15cc934af8202
   script:
     - cd web
     # `npm ci` fails if package-lock.json is out of sync with package.json
@@ -34,10 +39,10 @@ lint:web:
 lint:api:
   stage: lint
   tags: [k8s]
-  image: python:3.14-slim
+  image: python:3.14-slim@sha256:9aaa474097d094040649f2162a627c0049b408f52138d980916788d80f04802f
   script:
     - cd api
-    - pip install --no-cache-dir ruff
+    - pip install --no-cache-dir --require-hashes -r requirements-dev.lock
     - ruff check app tests
   only:
     - merge_requests
@@ -46,11 +51,15 @@ lint:api:
 test:api:
   stage: test
   tags: [k8s]
-  image: python:3.14-slim
+  image: python:3.14-slim@sha256:9aaa474097d094040649f2162a627c0049b408f52138d980916788d80f04802f
   script:
+    - apt-get update && apt-get install -y --no-install-recommends curl ca-certificates jq
+    - sh ci/install-kustomize.sh
+    - sh ci/install-kubectl.sh
     - cd api
-    - pip install --no-cache-dir -e ".[dev]"
-    - pytest tests -q
+    - pip install --no-cache-dir --require-hashes -r requirements-dev.lock
+    - sh ../ci/check-locks.sh
+    - pytest tests -q --cov=app --cov-report=term-missing --cov-fail-under=60
   only:
     - merge_requests
     - main
@@ -59,14 +68,14 @@ scan:api-base-trivy:
   stage: sast
   tags: [k8s]
   image:
-    name: aquasec/trivy:latest
+    name: aquasec/trivy:latest@sha256:8f6bb947dbc528902e11f2f5be52f7b519f6a39d5d148f41166f2040499768fb
     entrypoint: [""]
   script:
     # Job name explicitly says "base" — it scans the upstream base image
-    # (python:3.14-slim), NOT the kaniko-built api image. The built image
+    # (python:3.14-slim@sha256:9aaa474097d094040649f2162a627c0049b408f52138d980916788d80f04802f), NOT the shared BuildKit-built api image. The built image
     # is scanned by `scan:api-image-trivy` once `build:api` completes.
-    - trivy image --severity HIGH,CRITICAL --exit-code 0 --no-progress --format json --output api-scan.json python:3.14-slim
-    - trivy image --severity HIGH,CRITICAL --exit-code 0 --no-progress --format sarif --output api-scan.sarif python:3.14-slim
+    - trivy image --severity HIGH,CRITICAL --exit-code 0 --no-progress --format json --output api-scan.json python:3.14-slim@sha256:9aaa474097d094040649f2162a627c0049b408f52138d980916788d80f04802f
+    - trivy image --severity HIGH,CRITICAL --exit-code 0 --no-progress --format sarif --output api-scan.sarif python:3.14-slim@sha256:9aaa474097d094040649f2162a627c0049b408f52138d980916788d80f04802f
     - echo "API base image scanned"
   artifacts:
     reports:
@@ -83,14 +92,14 @@ scan:web-base-trivy:
   stage: sast
   tags: [k8s]
   image:
-    name: aquasec/trivy:latest
+    name: aquasec/trivy:latest@sha256:8f6bb947dbc528902e11f2f5be52f7b519f6a39d5d148f41166f2040499768fb
     entrypoint: [""]
   script:
-    # Job name explicitly says "base" — scans upstream node:22-alpine, NOT
-    # the kaniko-built web image. The built image is scanned by
+    # Job name explicitly says "base" — scans upstream node:22-alpine@sha256:0e1754758c2df4cfa3e68d59e2e1b7374bb7fd9ea6328eaaacf15cc934af8202, NOT
+    # the shared BuildKit-built web image. The built image is scanned by
     # `scan:web-image-trivy` once `build:web` completes.
-    - trivy image --severity HIGH,CRITICAL --exit-code 0 --no-progress --format json --output web-scan.json node:22-alpine
-    - trivy image --severity HIGH,CRITICAL --exit-code 0 --no-progress --format sarif --output web-scan.sarif node:22-alpine
+    - trivy image --severity HIGH,CRITICAL --exit-code 0 --no-progress --format json --output web-scan.json node:22-alpine@sha256:0e1754758c2df4cfa3e68d59e2e1b7374bb7fd9ea6328eaaacf15cc934af8202
+    - trivy image --severity HIGH,CRITICAL --exit-code 0 --no-progress --format sarif --output web-scan.sarif node:22-alpine@sha256:0e1754758c2df4cfa3e68d59e2e1b7374bb7fd9ea6328eaaacf15cc934af8202
     - echo "Web base image scanned"
   artifacts:
     reports:
@@ -104,70 +113,39 @@ scan:web-base-trivy:
     - main
 
 build:api:
+  extends: .container-build
   stage: build
-  tags: [k8s]
   timeout: 1h
-  image:
-    name: gcr.io/kaniko-project/executor:debug
-    entrypoint: [""]
-  before_script:
-    - |
-      mkdir -p /kaniko/.docker
-      printf '{"auths":{"%s":{"username":"%s","password":"%s"}}}' \
-        "$CI_REGISTRY" "$CI_REGISTRY_USER" "$CI_REGISTRY_PASSWORD" \
-        > /kaniko/.docker/config.json
-  script:
-    - |
-      TAG="${CI_COMMIT_TAG:-${CI_COMMIT_SHORT_SHA}}"
-      # Only default-branch pipelines move the shared :latest tag. MR pipelines
-      # still build and push :<sha> (so the build is validated), but must not
-      # overwrite :latest with unmerged code: k8s/ manifests still reference it.
-      # CI_COMMIT_BRANCH is unset in MR pipelines, so the test is false there.
-      set -- --destination "${IMAGE_API}:${TAG}"
-      if [ -n "${CI_COMMIT_BRANCH:-}" ] && [ "${CI_COMMIT_BRANCH}" = "${CI_DEFAULT_BRANCH}" ]; then
-        set -- "$@" --destination "${IMAGE_API}:latest"
-      fi
-      echo "Building ${IMAGE_API}:${TAG} ($*)"
-      /kaniko/executor \
-        --context "dir://${CI_PROJECT_DIR}/api" \
-        --dockerfile "${CI_PROJECT_DIR}/api/Dockerfile" \
-        "$@" \
-        --skip-tls-verify \
-        --snapshot-mode=redo \
-        --push-retry=3
+  variables:
+    CONTAINER_BUILD_CONTEXT: "$CI_PROJECT_DIR/api"
+    CONTAINER_IMAGE_REPO: "$CI_REGISTRY_IMAGE/api"
+  only:
+    - merge_requests
+    - main
+
+dockerfile-lint:api:
+  extends: .container-hadolint
+  variables:
+    CONTAINER_BUILD_CONTEXT: "$CI_PROJECT_DIR/api"
   only:
     - merge_requests
     - main
 
 build:web:
+  extends: .container-build
   stage: build
-  tags: [k8s]
   timeout: 1h
-  image:
-    name: gcr.io/kaniko-project/executor:debug
-    entrypoint: [""]
-  before_script:
-    - |
-      mkdir -p /kaniko/.docker
-      printf '{"auths":{"%s":{"username":"%s","password":"%s"}}}' \
-        "$CI_REGISTRY" "$CI_REGISTRY_USER" "$CI_REGISTRY_PASSWORD" \
-        > /kaniko/.docker/config.json
-  script:
-    - |
-      TAG="${CI_COMMIT_TAG:-${CI_COMMIT_SHORT_SHA}}"
-      # :latest only from the default branch -- see build:api.
-      set -- --destination "${IMAGE_WEB}:${TAG}"
-      if [ -n "${CI_COMMIT_BRANCH:-}" ] && [ "${CI_COMMIT_BRANCH}" = "${CI_DEFAULT_BRANCH}" ]; then
-        set -- "$@" --destination "${IMAGE_WEB}:latest"
-      fi
-      echo "Building ${IMAGE_WEB}:${TAG} ($*)"
-      /kaniko/executor \
-        --context "dir://${CI_PROJECT_DIR}/web" \
-        --dockerfile "${CI_PROJECT_DIR}/web/Dockerfile" \
-        "$@" \
-        --skip-tls-verify \
-        --snapshot-mode=redo \
-        --push-retry=3
+  variables:
+    CONTAINER_BUILD_CONTEXT: "$CI_PROJECT_DIR/web"
+    CONTAINER_IMAGE_REPO: "$CI_REGISTRY_IMAGE/web"
+  only:
+    - merge_requests
+    - main
+
+dockerfile-lint:web:
+  extends: .container-hadolint
+  variables:
+    CONTAINER_BUILD_CONTEXT: "$CI_PROJECT_DIR/web"
   only:
     - merge_requests
     - main
@@ -180,24 +158,26 @@ build:web:
 # - HIGH/CRITICAL fail the job (exit 1). --ignore-unfixed skips findings that
 #   have no upstream fix yet: nothing can be done about those and failing the
 #   deploy on them would just freeze it.
-# - --image-src remote pulls from the registry, so the job can never fall back
-#   to a stale copy in a local docker store. The registry is reached with the
-#   job's own CI credentials (TRIVY_USERNAME/TRIVY_PASSWORD). --insecure
-#   mirrors the kaniko --skip-tls-verify push in build:*: the registry cert is
-#   not in this image's trust store.
+# - --image-src remote pulls from the registry with job-scoped credentials.
+#   The reviewed internal CA augments public roots and TLS verification stays on.
 scan:api-image-trivy:
   stage: test
   tags: [k8s]
   image:
-    name: aquasec/trivy:latest
+    name: aquasec/trivy:latest@sha256:8f6bb947dbc528902e11f2f5be52f7b519f6a39d5d148f41166f2040499768fb
     entrypoint: [""]
   needs: [build:api]
   variables:
     TRIVY_USERNAME: "$CI_REGISTRY_USER"
     TRIVY_PASSWORD: "$CI_REGISTRY_PASSWORD"
     TRIVY_NO_PROGRESS: "true"
+  before_script:
+    - apk add --no-cache jq
+    - . ci/trust-registry.sh
+    - IMAGE_DIGEST=$(sh ci/read-image-digest.sh build-api "$IMAGE_API" "$CI_COMMIT_SHA")
+    - export IMAGE_DIGEST
   script:
-    - trivy image --insecure --image-src remote --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 "${IMAGE_API}:${CI_COMMIT_SHORT_SHA}"
+    - trivy image --image-src remote --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 "${IMAGE_API}@${IMAGE_DIGEST}"
   only:
     - merge_requests
     - main
@@ -206,15 +186,20 @@ scan:web-image-trivy:
   stage: test
   tags: [k8s]
   image:
-    name: aquasec/trivy:latest
+    name: aquasec/trivy:latest@sha256:8f6bb947dbc528902e11f2f5be52f7b519f6a39d5d148f41166f2040499768fb
     entrypoint: [""]
   needs: [build:web]
   variables:
     TRIVY_USERNAME: "$CI_REGISTRY_USER"
     TRIVY_PASSWORD: "$CI_REGISTRY_PASSWORD"
     TRIVY_NO_PROGRESS: "true"
+  before_script:
+    - apk add --no-cache jq
+    - . ci/trust-registry.sh
+    - IMAGE_DIGEST=$(sh ci/read-image-digest.sh build-web "$IMAGE_WEB" "$CI_COMMIT_SHA")
+    - export IMAGE_DIGEST
   script:
-    - trivy image --insecure --image-src remote --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 "${IMAGE_WEB}:${CI_COMMIT_SHORT_SHA}"
+    - trivy image --image-src remote --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 "${IMAGE_WEB}@${IMAGE_DIGEST}"
   only:
     - merge_requests
     - main
@@ -222,10 +207,10 @@ scan:web-image-trivy:
 test:db-migrations:
   stage: test
   tags: [k8s]
-  image: python:3.14-slim
+  image: python:3.14-slim@sha256:9aaa474097d094040649f2162a627c0049b408f52138d980916788d80f04802f
   script:
     - cd api
-    - pip install --no-cache-dir -e ".[dev]"
+    - pip install --no-cache-dir --require-hashes -r requirements-dev.lock
     - python -c "import starlette; print(f'Starlette {starlette.__version__} installed')"
     - alembic upgrade head --sql
     - echo "Database schema migrations validated"
@@ -258,12 +243,17 @@ test:db-migrations:
 deploy:k8s:
   stage: deploy
   tags: [k8s]
-  image:
-    name: bitnami/kubectl:latest
-    entrypoint: [""]
+  image: debian:stable-slim@sha256:fbfb4059d2127120aa05b6e6064523d2102552f0cf0026ddf0701c12f1f8f3e0
+  resource_group: model-pricing-production
+  before_script:
+    - apt-get update && apt-get install -y --no-install-recommends curl ca-certificates jq
+    - sh ci/install-kubectl.sh
+    - sh ci/install-kustomize.sh
   needs:
     - build:api
     - build:web
+    - dockerfile-lint:api
+    - dockerfile-lint:web
     - lint:web
     - lint:api
     - scan:api-image-trivy
@@ -276,22 +266,8 @@ deploy:k8s:
   script:
     - echo "${KUBE_CONFIG}" | base64 -d > /tmp/kubeconfig
     - export KUBECONFIG=/tmp/kubeconfig
-    - kubectl set image deployment/api migrate=${IMAGE_API}:${CI_COMMIT_SHORT_SHA} api=${IMAGE_API}:${CI_COMMIT_SHORT_SHA} -n model-pricing
-    - kubectl set image deployment/web web=${IMAGE_WEB}:${CI_COMMIT_SHORT_SHA} -n model-pricing
-    - kubectl set image cronjob/refresh-pricing refresh=${IMAGE_API}:${CI_COMMIT_SHORT_SHA} -n model-pricing
-    - kubectl set image cronjob/daily-report report=${IMAGE_API}:${CI_COMMIT_SHORT_SHA} -n model-pricing
-    - kubectl set image cronjob/kilo-diff diff=${IMAGE_API}:${CI_COMMIT_SHORT_SHA} -n model-pricing
-    - set +e
-    - kubectl rollout status deployment/api -n model-pricing --timeout=120s
-    - api_rc=$?
-    - kubectl rollout status deployment/web -n model-pricing --timeout=120s
-    - web_rc=$?
-    - set -e
-    - if [ "$api_rc" -ne 0 ] || [ "$web_rc" -ne 0 ]; then
-    -     echo "Rollout failed; reverting to previous revision"
-    -     kubectl rollout undo deployment/api -n model-pricing || true
-    -     kubectl rollout undo deployment/web -n model-pricing || true
-    -     exit 1
-    - fi
+    - bash scripts/deploy-prod.sh
+  artifacts:
+    paths: [rendered-prod.yaml]
   only:
     - main

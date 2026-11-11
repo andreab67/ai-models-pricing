@@ -1,0 +1,459 @@
+---
+description: Code evidence rules for dependency seams, growing accumulators, and field omission semantics.
+globs: **/*.py, **/*.js, **/*.jsx, **/*.ts, **/*.tsx, **/*.mts, **/*.cts, **/*.mjs, **/*.cjs
+alwaysApply: false
+---
+<!-- master: ai-code-review/rules/code-evidence.md; do not edit generated copies @ 1b9aa6c38b6e -->
+
+## Test behavior through meaningful dependency seams
+Keep the behavior under test real. For deterministic tests, stub a narrow external effect (network, clock, filesystem, process) instead of the whole module under test. Use existing seams; do not add an interface for every helper. Module mocks are allowed when a narrower supported seam is unavailable and real behavior still runs.
+```python
+# bad: no production behavior runs
+monkeypatch.setattr(billing, "load_balance", lambda account: 25)
+assert billing.load_balance("demo") == 25
+```
+```python
+# good: production parsing runs; only its network effect is replaced
+monkeypatch.setattr(billing.transport, "get", lambda path: {"balance": 25})
+assert billing.load_balance("demo") == 25
+```
+<!-- src: anti-slop/no-module-mocking; narrowed 2026-10-09; complements python-tests.md -->
+
+## Avoid repeated full copies of a growing accumulator
+Copying the entire result per new item can make construction quadratic. Use a fresh locally owned accumulator or a suitable library operation. Preserve caller-owned/shared data and consider the actual bound before reporting a performance defect.
+```python
+# bad: each iteration copies all previous entries
+result = {}
+for row in rows:
+    result = {**result, row.key: row.value}
+```
+```python
+# good: this function owns the fresh result
+result = {}
+for row in rows:
+    result[row.key] = row.value
+```
+This also applies to JS/TS reducer spreads, concat, and slice copies. It is not a ban on reduce, immutable code, filter().map(), or small bounded copies; do not mutate inputs as a workaround.
+<!-- src: anti-slop/no-reduce-accumulator-copy, oxc/no-accumulating-spread; adapted 2026-10-09 -->
+
+## Preserve omitted fields when changing object construction
+An absent property differs from a present undefined value for enumeration, membership, spreads, and some SDKs. Prove the receiver treats them alike before replacing conditional inclusion with an unconditional field. Conditional empty-object spreads remain valid.
+```typescript
+// bad when absence is part of the contract
+const settings = { deadline: requestedDeadline };
+```
+```typescript
+// good: absence stays absence when no deadline was requested
+const settings: { deadline?: number } = {};
+if (requestedDeadline !== undefined) settings.deadline = requestedDeadline;
+```
+Use the existing idiom when it preserves the contract; this rule does not require rewriting valid conditional spreads.
+<!-- src: anti-slop/no-conditional-empty-object-spread; semantics retained without the blanket restriction; adapted 2026-10-09 -->
+
+## Preserve current decisions when summarizing older snapshots
+An earlier healthy snapshot cannot override a current failure or required follow-up. Include the authoritative findings in summary inputs, and keep mandatory status or next-step wording deterministic when model prose could dismiss it. Check downstream lesson writes as well as the displayed sentence.
+```python
+# bad: this input omits the newer halted-maintenance finding
+note = summarize(previous_health_snapshot)
+```
+```python
+# good: required follow-up cannot become an all-clear sentence
+if requires_followup(current_findings):
+    note = "Maintenance findings require follow-up; review the evidence and next steps."
+else:
+    note = summarize(previous_health_snapshot)
+```
+<!-- src: morning-report halted-node review miss, 2026-10-28 -->
+
+## Verify external command names before mirroring them in fixtures
+A passing fake CLI does not prove that the installed tool accepts its resource names or options. Verify new command vocabulary through installed discovery/help or an actual read-only call, then make fixtures reject unsupported inputs. Existing call syntax copied from the implementation is not independent evidence.
+```python
+# bad: the fake accepts this invented plural, so the test passes
+subprocess.run(["kubectl", "get", "pvcs", "-A", "-o", "json"], check=True)
+```
+```python
+# good: canonical resource verified against the installed API
+subprocess.run(["kubectl", "get", "persistentvolumeclaims", "-A", "-o", "json"], check=True)
+```
+Verified tool shortcuts remain valid. Test unavailable collection separately from successful empty output, and prove the real read path before declaring integration complete.
+<!-- src: PVC gather review miss, 2026-10-30 -->
+
+## Record completion only after the required effect succeeds
+Place a success or completion observation after the operation whose success it asserts. Check the failure path at the external effect boundary, including conflict and timeout. Pausing a heartbeat before a change is valid; publishing completion before the change succeeds is not.
+```python
+# bad: a failed uncordon leaves fresh completion on a cordoned node
+lifecycle.clear()
+uncordon_owned_node()
+```
+```python
+# good: failed scheduling restoration retains active observations
+lifecycle.pause()
+uncordon_owned_node()
+lifecycle.clear()
+```
+Keep final publication within the existing ownership scope. An intentional scheduling hold differs from a successful uncordon; verify each owner's actual completion contract rather than assuming one call order fits every operation.
+Revalidate the source identity after cleanup and before publishing success. A return expression evaluated before a finally block cannot attest to identity changes during cleanup.
+```python
+# bad: cleanup can replace the source after this observation
+try:
+    return read_source_identity()
+finally:
+    cleanup_snapshot()
+```
+```python
+# good: publication describes the source that survived cleanup
+cleanup_snapshot()
+require_same_identity(captured_identity, read_source_identity())
+publish_success()
+```
+<!-- src: worker lifecycle completion-order review miss, 2026-10-30 -->
+
+## Validate with the project-pinned tool version
+A clean newer local linter does not prove the pinned CI linter accepts the same source. Check the actual version and use the project pin for the final gate; default checks and parsing can differ between releases.
+```python
+# bad: CI pins another version, but this unspecified local binary is the proof
+subprocess.run(["ruff", "check", *paths], check=True)
+```
+```python
+# good: this environment was provisioned with the verified CI version
+subprocess.run([str(ci_venv / "bin" / "ruff"), "check", *paths], check=True)
+```
+An existing container or environment with the verified pin is equally valid; no new environment is required when the installed tool already matches.
+<!-- src: Ruff 0.16.8 versus CI 0.15.13 E701 review miss, 2026-10-30 -->
+
+Generated test helpers must use an interpreter present in the target test environment. A Python image can provide Python under /usr/local/bin without /usr/bin/python3.
+```python
+# bad: the helper executes only on hosts with this particular path
+helper.write_text("#!/usr/bin/python3\n" + body)
+```
+```python
+# good: the helper uses the same interpreter that is running the test
+helper.write_text(f"#!{sys.executable}\n" + body)
+```
+Exercise the helper in the actual CI image when path or runtime parity matters; a local green run alone cannot establish that parity.
+<!-- src: lifecycle gather fixture interpreter-path review miss, 2026-10-30 -->
+
+Validate deployment UID, writable parent ownership, sudo availability and PATH too. When interpreter and fake CLI share a directory, removing that directory from PATH may hide both; invoke a private interpreter alias while isolating the fake CLI.
+```python
+# bad: root-only success does not prove the service account can publish
+subprocess.run(["sudo", "publisher", str(destination)], check=True)
+```
+```python
+# good: exercise the real deployment account and its owned destination
+assert os.geteuid() == expected_uid
+assert destination.parent.stat().st_uid == expected_uid
+subprocess.run([str(publisher), str(destination)], check=True, env=deployment_env)
+```
+
+Exercise filesystem fixtures in the process and layout that actually performs the
+write. A shallow one-parent fixture, or a restrictive umask left by another test,
+does not prove nested directories are private in a remote child. Test the actual
+entry point in a fresh subprocess with the deployed umask and realistic depth.
+```python
+# bad: the shallow fixture inherits another test's private umask
+run_remote_fixture("wsl/file")
+```
+```python
+# good: reviewed_fixture invokes the actual remote entry against a temp tree
+script = '''
+import os
+from reviewed_fixture import run_actual_remote_entry
+os.umask(0o022)
+run_actual_remote_entry("wsl/observations/a/capture/file")
+'''
+subprocess.run([sys.executable, "-B", "-c", script], cwd=fixture_dir, check=True)
+assert all(stat.S_IMODE(p.stat().st_mode) == 0o700
+           for p in destination.rglob("*") if p.is_dir())
+```
+An uncertain or failed publisher attempt stays recorded and is not rerun.
+Any metadata-only recovery needs a separately reviewed, journaled procedure.
+<!-- src: archive nested-parent remote-umask review miss, 2026-11-01 -->
+
+## Verify real transport limits in both directions
+Exercise representative command and response sizes through the actual transport. A successful exit with truncated output is not a complete capture. Read the transport's limit and completeness metadata; a tiny fake cannot establish either bound.
+```python
+# bad: a tail-only response can silently lose most of the evidence
+capture = transport.run(large_command).stdout
+```
+```python
+# good: stage oversized input separately and require complete output
+require_input_within_limit(command, transport.input_limit)
+result = transport.run(command, full=True)
+require_complete(result)
+capture = result.stdout
+```
+
+A nested shell can expand a variable or command substitution before the intended
+shell sees it, leaving an empty destination and copying into the caller's working
+directory. Resolve the private destination in the executing environment and pass
+argument vectors and an explicit working directory; verify containment before
+the write. Preserve any existing files if a boundary fails.
+```python
+# bad: an outer shell can consume the inner shell's destination variable
+run_nested_shell("copy fixture into $scratch")
+```
+```python
+# good: paths and cwd are concrete in the executing process
+scratch = create_private_scratch()
+require_outside_workspace(scratch)
+shutil.copytree(fixture, scratch / "fixture")
+subprocess.run(test_argv, cwd=scratch / "fixture", check=True)
+```
+
+## Close active evidence dependencies and semantic claims
+Derive active loader dependencies from verified executed source and independently
+enumerate the actual approved contract's semantic artifacts and permanent claims,
+even when no formal path field mentions them. Traverse references from every
+seed to closure, including typed relative paths and large JSON without a
+size-based skip. Resolve prior-mirror aliases in their exact path context and
+verify their source and digest; unresolved references fail the proposed closure.
+```python
+# bad: this omits nonformal contract claims and stops at initial references
+seeds = discover_active_dependencies(verified_source) | formal_refs(record)
+assert seeds <= verified_inventory | verified_prior_mirror_refs
+```
+```python
+# good: contract-specific claims are independent seeds, then traverse all edges
+seeds = discover_active_dependencies(verified_source) | formal_refs(record)
+seeds |= enumerate_contract_artifacts_and_claims(approved_contract)
+closure = walk_all_references(seeds, parse_large_json=True,
+                              resolve_typed_relative=True)
+assert verify_each_against_inventory_or_contextual_prior_alias(closure)
+```
+The contract-specific enumerator must name the actual required claims and
+artifacts; the traversal must report unresolved edges rather than silently
+skip them. A helper name or syntactically closed inventory is not proof that
+the real entry path and semantic contract were fully enumerated.
+<!-- src: supplement missing clock/helper/PIN and postgap missing permanent claims, 2026-11-01 -->
+
+## Exercise the intended validation boundary
+A corrupted outer receipt can reject a negative fixture before its intended
+semantic guard runs. Rebind synthetic enclosing digests after mutation and
+assert the intended rejection at the actual entry point. Keep such receipts
+strictly test-only. For paginated APIs test source, page order, and terminal
+evidence according to the specific API contract; do not infer completeness
+from a plausible item count.
+```python
+# bad: stale enclosing digest can fail before the source policy is checked
+mutated = change_source(fixture, "web")
+with pytest.raises(ValueError):
+    validate(mutated, original_receipt)
+```
+```python
+# good: this synthetic receipt reaches and names the semantic guard
+mutated = change_source(fixture, "web")
+receipt = build_synthetic_receipt_for(mutated)
+with pytest.raises(ValueError, match="pipeline source"):
+    validate(mutated, receipt)
+```
+```python
+# bad: expected count alone does not establish a terminal page
+assert len(jobs) == expected_count
+```
+```python
+# good: validate actual page metadata and terminal response too
+assert_pipeline_source(pipeline, expected="push")
+assert_complete_ordered_pages(page_receipts, expected_terminal=[])
+assert len(jobs) == expected_count
+```
+<!-- src: CI semantic negative fixtures and pagination review, 2026-11-01 -->
+
+## Preserve callable bindings through a complete path
+A later assignment can shadow a helper in the same scope. Test the complete
+path through its later use, not only earlier parsing or a manual diff.
+```python
+# bad: the list replaces the callable used for the trace
+def body(path):
+    return read_body(path)
+body = decode_page(raw_page)
+trace = body(trace_path)
+```
+```python
+# good: the page and helper retain distinct bindings
+def body(path):
+    return read_body(path)
+page_body = decode_page(raw_page)
+trace = body(trace_path)
+```
+Record a manual review as manual; report a passing test only after its actual
+completion and exit are verified. Preserve failed attempts as failures.
+<!-- src: CI reader local shadow and green-09 test failure, 2026-11-01 -->
+
+## Complete all fail-closed preflight before external effects
+When a contract requires every input to pass before tool execution, validate the entire set first. Resolve lexical parent traversal and enforce the permitted root plus symlink/ancestor policy before creating scratch directories; Path.absolute() alone does not establish containment.
+```python
+# bad: the first tool runs before the second archive is checked
+for archive in archives:
+    validate_archive(archive)
+    run_validator(archive, scratch.absolute())
+```
+```python
+# good: rejected input leaves tools uncalled and scratch absent
+destination = validate_contained_absent_path(scratch, allowed_roots)
+for archive in archives:
+    validate_archive(archive)
+create_private_directory(destination)
+for archive in archives:
+    run_validator(archive, destination)
+```
+Test a corrupt final input, lexical `..`, symlink ancestors and an existing destination through the real filesystem boundary.
+
+A read-only import can still write bytecode into a protected source tree.
+Disable bytecode before loading, verify source bytes before execution, and
+check the exact tree afterward. Do not weaken unexpected-file checks to hide
+the side effect.
+```python
+# bad: import may create a cache before the integrity check
+module = import_from_protected_tree(path)
+check_bundle_strict(bundle)
+```
+```python
+# good: the launcher also uses Python -B
+sys.dont_write_bytecode = True
+check_bundle_strict(bundle)
+source = read_and_verify_digest(path, expected_sha256)
+exec(compile(source, str(path), "exec"), private_namespace)
+check_bundle_strict(bundle)
+```
+
+## Retain authority when a child outcome is unknown
+Interrupts, generator finalization and journal failures do not prove a child stopped. Keep canonical ownership until the external outcome is known; logging failure must not release authority. A persistent claim for the same gate prevents another process from repeating an ambiguous write.
+```python
+# bad: an interrupt or failed journal releases authority over a live child
+try:
+    wait_for_child(child)
+    write_journal()
+finally:
+    release_owner()
+```
+```python
+# good: the durable claim survives unknown outcomes and logging failures
+claim_gate_once(gate_id)
+outcome = wait_for_confirmed_child_outcome(child)
+write_journal(outcome)
+release_owner_after_verified_outcome(outcome)
+```
+Check the interrupt, close/finalization and journal-error paths, not only ordinary child exits.
+
+A transport or tool-session exit and partial stdout are not the launched
+child's OS exit. Retain the actual child completion and private streams, or
+record the child outcome as UNKNOWN. A later supplemental observation keeps
+its own identity and cannot turn the interrupted attempt into a pass.
+```python
+# bad: successful output does not prove this child completed successfully
+receipt["child_exit"] = tool_session_exit
+receipt["passed"] = bool(stdout)
+```
+```python
+# good: only this child's durable completion can establish its exit
+outcome = wait_for_actual_child_or_unknown(child)
+write_private_receipt(outcome, stdout_path, stderr_path)
+if outcome.exit_code is None:
+    preserve_unknown_attempt()
+```
+
+## Bind metric continuity to authoritative samples and workload identity
+Require every expected family and fresh raw sample times after rollout. Positive lookback queries can return old samples; timestamp() around a transformed expression can report evaluation time. Prove timestamp semantics against the real query engine. Keep the corrected authoritative baseline and each observation's actual pod/IP identity; do not repair an empty wrong-job baseline by relabeling it with a replacement's IP.
+```python
+# bad: a present aggregate does not prove a fresh source sample
+assert query("timestamp(sum(service_events_total))")
+```
+```python
+# good: evaluate raw selectors with the captured source identity
+for selector in required_raw_selectors(source_identity):
+    samples = query(f"timestamp({selector})")
+    require_nonempty_sample_times_after(samples, rollout_cutoff)
+compare_with_authoritative_baseline(baseline, current)
+```
+Target continuity follows trusted workload identity and replica multiplicity, not immutable physical pod names or IPs. Preserve URL scheme, port and path semantics and the exact known-down set; establish preexisting replacements from source-bound historical evidence.
+```python
+# bad: an IP change fails continuity, while sets hide a lost replica
+assert {target.url for target in current} == {target.url for target in baseline}
+```
+```python
+# good: trusted ownership maps replacements without erasing counts or URLs
+assert workload_target_counts(current, trusted_owners) == baseline_workload_counts
+assert known_down_endpoints(current) == baseline_known_down
+```
+
+For freshness, bind query evaluation and underlying samples to the same
+reader identity and a same-reader time anchor. Wall and monotonic samples used
+to bound elapsed capture time must come from the same verified clock domain;
+a host wall clock can still step or diverge from its monotonic clock;
+an SSH client host's wall clock and a remote monotonic clock are not a pair.
+Check both bracket offsets and the elapsed bound without changing thresholds or
+adjusting clocks; preserve failed or uncertain attempts and their raw inputs.
+```python
+# bad: unrelated clock domains can make a valid sample appear future or stale
+elapsed = remote_monotonic_after - local_monotonic_before
+age = local_wall_now - remote_evaluation_time
+```
+```python
+# good: identity, scalar anchor and paired clock evidence stay source-bound
+source = read_source_identity(reader)
+before = paired_clock_sample(clock_provider)
+samples = read_raw_samples_and_times(reader)
+anchor = read_and_validate_time_scalar(reader)
+after = paired_clock_sample(clock_provider)
+require(read_source_identity(reader) == source)
+validate_offsets_and_elapsed(samples, anchor, before, after, limits)
+```
+
+Exercise the complete composed rollout gate end to end, including ordinary CI
+rollouts and the order of every legacy and replacement guard. A
+replacement-aware proof tested alone is not reachable if an earlier stale
+literal-identity guard rejects the same input. Preserve the original literal
+proof and any failed observation as historical evidence. A separately scoped
+replacement proof must bind current Pod and controller UIDs to their trusted
+workloads and still enforce health, multiplicity, URL semantics and the exact
+known-down set; reject unknown replacements. Do not simply move or remove the
+old guard without that proof. Test an authorized replacement and an unknown
+replacement or genuine loss through the actual composed entry point.
+```python
+# bad: the legacy literal guard can fail before the replacement proof runs
+legacy_exact_target_check(old_targets, new_targets)
+replacement_target_proof(old_targets, new_targets, trusted_owners)
+```
+```python
+# good: keep history and apply a separately proven replacement contract
+history = verify_immutable_historical_proof(old_evidence)
+current = prove_uid_bound_replacements(new_targets, trusted_owners)
+check_target_health_and_multiset(history, current, known_down)
+```
+
+## Normalize typed API lists only from trusted type evidence
+Real typed-list items may omit apiVersion/kind. Infer them only from the known endpoint or an established core collector; reject an explicit conflicting item type. Fixtures containing complete item type metadata do not test this boundary.
+```python
+# bad: valid typed-list items are dropped when kind is absent
+items = [item for item in response["items"] if item.get("kind") == "Secret"]
+```
+```python
+# good: the verified endpoint supplies missing types; conflicts fail
+items = normalize_typed_list(response, expected_api="v1", expected_kind="Secret")
+require_no_type_conflicts(items)
+```
+
+## Validate numeric values according to the metric type
+An empty-window summary quantile can be NaN without invalidating finite companion count/sum metrics. Represent that specific estimate as unavailable after validating its family and companions. Reject infinity, invalid core gauges and error counters; do not permit NaN globally or coerce an unavailable estimate to zero.
+```python
+# bad: missing estimates become invented measurements
+value = 0.0 if math.isnan(value) else value
+```
+```python
+# good: only the documented summary case becomes unavailable
+if is_empty_window_summary_quantile(sample, metadata, finite_companions):
+    estimate = None
+else:
+    estimate = require_finite_metric_value(sample)
+```
+
+Report every concrete defect inside the assigned review scope, including multiple independent defects in one helper. A narrow scope limits files or responsibilities, not the number of findings. Record review misses as concise bad/good examples in the matching master section, then regenerate repository copies; extend an existing rule when it already covers the mechanism.
+```python
+# bad: a first finding silently suppresses other verified defects
+return verified_findings[:1]
+```
+```python
+# good: return every distinct, verified, in-scope finding
+return distinct_in_scope(verified_findings, assigned_scope)
+```
+<!-- src: transport, runtime, preflight, ownership and metric-evidence review misses, 2026-10-31 -->
