@@ -1,0 +1,58 @@
+---
+description: TypeScript contract rules for runtime evidence, inferred types, and supported React props.
+paths:
+  - "**/*.ts"
+  - "**/*.tsx"
+  - "**/*.mts"
+  - "**/*.cts"
+---
+<!-- master: ai-code-review/rules/typescript-contracts.md; do not edit generated copies @ cae5a9adcb71 -->
+
+## Validate external values before typed use
+Assertions do not validate JSON. Use the existing parser or a sufficient runtime guard at the boundary; unknown is appropriate there. A necessary assertion needs a specific invariant beside it, not a generic safety claim.
+```typescript
+// bad
+const notice = JSON.parse(payload) as unknown as Notice;
+deliver(notice.recipient);
+```
+```typescript
+// good: parseNotice validates supported fields and rejects bad input
+const notice = parseNotice(JSON.parse(payload));
+deliver(notice.recipient);
+```
+Do not add a schema dependency solely for this rule; an existing validator or adequate type guard is valid.
+<!-- src: anti-slop/no-chained-type-assertions, no-widen-then-assert, require-safety-comment-for-type-assertion; adapted 2026-10-09 -->
+
+## Preserve known types and keys
+Do not erase useful inferred keys or types merely to cast them back later. Use satisfies when checking conformance without broadening a known value; an intentionally open dictionary or accumulator remains valid.
+```typescript
+// bad
+const operations: Record<string, Operation> = { refresh: refreshCache };
+const selected = operations["refersh"]; // broad keys admit the typo
+```
+```typescript
+// good
+const operations = { refresh: refreshCache } satisfies Record<string, Operation>;
+const selected = operations.refresh;
+```
+Do not remove unknown from untrusted input just to satisfy a lint preference.
+<!-- src: anti-slop/no-known-value-widening; adapted 2026-10-09 -->
+
+## Require props for supported interactions
+Derive React contracts from supported consumers and runtime states. A visible enabled action needs a callable handler; test/story convenience alone does not justify optionality. Preserve real null, loading, error, compatibility states and external public consumers.
+```tsx
+// bad: an enabled control can silently do nothing
+type TileProps = { onInspect?: () => void };
+function Tile({ onInspect }: TileProps) {
+  return <button onClick={() => onInspect?.()}>Inspect</button>;
+}
+```
+```tsx
+// good: supported callers supply the enabled action
+type TileProps = { onInspect: () => void };
+function Tile({ onInspect }: TileProps) {
+  return <button onClick={onInspect}>Inspect</button>;
+}
+```
+A genuinely disabled/noninteractive variant may omit its handler if the contract makes that state explicit. Absence of local usage is not proof that a public prop can be removed.
+<!-- src: humanlayer/narrow-react-prop-types; adapted 2026-10-09 -->

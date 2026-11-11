@@ -1,5 +1,5 @@
-# syntax=docker/dockerfile:1.7
-FROM python:3.14-slim AS builder
+# syntax=docker/dockerfile:1.7@sha256:a57df69d0ea827fb7266491f2813635de6f17269be881f696fbfdf2d83dda33e
+FROM python:3.14-slim@sha256:9aaa474097d094040649f2162a627c0049b408f52138d980916788d80f04802f AS builder
 
 ENV PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
@@ -7,20 +7,12 @@ ENV PIP_NO_CACHE_DIR=1 \
     PYTHONUNBUFFERED=1
 
 WORKDIR /build
-RUN apt-get update && apt-get install -y --no-install-recommends \
-        build-essential \
-    && rm -rf /var/lib/apt/lists/*
-
-# Build wheels for the runtime dependencies only. The application itself is
-# copied into /app in the runtime stage (with its data files and templates),
-# so there is no project wheel to build here.
-COPY pyproject.toml ./
-RUN python -c "import tomllib; print('\n'.join(tomllib.load(open('pyproject.toml', 'rb'))['project']['dependencies']))" > requirements.txt \
-    && pip install --upgrade pip wheel \
-    && pip wheel --wheel-dir /wheels -r requirements.txt
+# Download only upstream wheels verified by the committed Python 3.14 lock.
+COPY requirements.lock ./
+RUN pip download --only-binary=:all: --require-hashes --dest /wheels -r requirements.lock
 
 # --------------------------------------------------------------------------
-FROM python:3.14-slim AS runtime
+FROM python:3.14-slim@sha256:9aaa474097d094040649f2162a627c0049b408f52138d980916788d80f04802f AS runtime
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -38,12 +30,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 COPY --from=builder /wheels /wheels
+COPY --from=builder /build/requirements.lock /tmp/requirements.lock
 # pip and setuptools are not needed at run time (uvicorn, alembic and the
 # CronJobs are plain `python -m ...` entrypoints) and the base image's vendored
 # copies (msgpack, urllib3, setuptools) carry HIGH CVEs, so remove them once the
 # app deps are installed.
-RUN pip install --no-index --find-links=/wheels /wheels/*.whl \
-    && rm -rf /wheels \
+RUN pip install --no-index --find-links=/wheels --require-hashes -r /tmp/requirements.lock \
+    && rm -rf /wheels /tmp/requirements.lock \
     && python -m pip uninstall -y pip setuptools wheel \
     && rm -rf /usr/local/lib/python3*/site-packages/pip \
               /usr/local/lib/python3*/site-packages/pip-*.dist-info \

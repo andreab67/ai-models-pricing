@@ -24,7 +24,7 @@ spec:
         seccompProfile: { type: RuntimeDefault }
       initContainers:
         - name: migrate
-          image: gitlab.andrea-house.com:5050/root/model-pricing/api:latest
+          image: gitlab.andrea-house.com:5050/root/model-pricing/api@sha256:0cc1c783d31ab15ce8c8506312f8ad52d31eb929e1048bd58e7cdab654d8c7cd
           command: ["alembic", "upgrade", "head"]
           # No ses-creds: only the mail-sending CronJobs need SMTP credentials.
           envFrom:
@@ -42,7 +42,7 @@ spec:
             capabilities: { drop: ["ALL"] }
       containers:
         - name: api
-          image: gitlab.andrea-house.com:5050/root/model-pricing/api:latest
+          image: gitlab.andrea-house.com:5050/root/model-pricing/api@sha256:0cc1c783d31ab15ce8c8506312f8ad52d31eb929e1048bd58e7cdab654d8c7cd
           imagePullPolicy: Always
           ports:
             - { containerPort: 8000, name: http }

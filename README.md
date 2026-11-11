@@ -125,9 +125,10 @@ docker compose exec api python -m app.jobs.refresh_pricing
 
 ```bash
 cd api
-python -m venv .venv && source .venv/bin/activate
-pip install -e ".[dev]"
-export DATABASE_URL=postgresql+asyncpg://pricing:pricing@localhost:5432/pricing
+python3.14 -m venv .venv && source .venv/bin/activate
+pip install --require-hashes -r requirements-dev.lock
+python -m pip check
+export DATABASE_URL=postgresql+psycopg://pricing:pricing@localhost:5432/pricing
 export REDIS_URL=redis://localhost:6379/0
 alembic upgrade head
 uvicorn app.main:app --reload
@@ -182,21 +183,23 @@ See `FUNCTIONAL.md` for complete endpoint documentation and response schemas.
 
 ### Deploy
 
+CI builds API and web images through the pinned shared rootless BuildKit include,
+publishing full 40-character commit SHA tags and job-specific digest metadata.
+`deploy:k8s` validates the `build-api` and `build-web` metadata producers, image
+repositories and current full SHA before any cluster write. It renders an isolated
+Kustomize copy through `scripts/render-prod-overlay.sh`, then
+`scripts/deploy-prod.sh` updates only live image fields, preserving operator-owned
+configuration. API and migration images move together; scheduled jobs move after
+API and web rollouts are ready. Failed rollouts undo the API and web Deployments.
+Live image references must match the validated build digests.
+
+The committed production overlay retains verified fallback digests for deliberate
+manual recovery. Select another build through the validated CI flow. Changes to
+environment values, Secret references or schedules require separately reviewed
+resource updates that preserve operator-owned settings.
+
 ```bash
-# 1. Build and push images (CI does this automatically on push to main)
-docker build -t <registry>/api:latest api/
-docker build -t <registry>/web:latest web/
-docker push <registry>/api:latest
-docker push <registry>/web:latest
-
-# 2. Apply the manifests. This is a manual step: the deploy:k8s CI job only runs
-#    `kubectl set image` + `rollout status`, it does not apply k8s/. Changes under
-#    k8s/ (env, secret scoping, schedules) reach the cluster only through this.
-#    The overlay pins `:latest`; to keep the images CI deployed, rewrite the tags
-#    to the live SHAs first (see the one-time command in the MR description).
-kubectl apply -k k8s/overlays/prod
-
-# 3. Verify
+# Verify
 kubectl -n model-pricing get pods,svc,httproute
 kubectl -n model-pricing logs deploy/api -f
 ```
@@ -357,3 +360,25 @@ We help organizations:
 **Built for teams running multi-provider AI workloads who need cost visibility, optimization, and data-driven insights.**
 
 The codebase is designed for extensibility—pricing providers, ranking algorithms, and report formats are all customizable without modifying core infrastructure. Deploy on your own infrastructure or contact us for managed hosting options.
+
+
+## Locked build and deployment checks
+
+Use Linux Python 3.14. Install `api/requirements-dev.lock` with `pip install --require-hashes`,
+then run `sh ci/check-locks.sh` from the repository root. From `api/`, run
+`ruff check app tests` and `pytest --cov=app`. Regenerate both locks with
+`sh ci/compile-locks.sh` after an intentional dependency change. The runtime image installs only
+the runtime lock; its offline wheel install also verifies every archive hash.
+
+The reviewed shared BuildKit include publishes the full commit SHA and a job-specific digest artifact.
+CI validates that provenance, renders an isolated Kustomize override and updates only live container
+image fields, preserving operator settings. API and migration images move together; scheduled jobs
+move after API/web readiness. The committed manual overlay pins the last verified deployed digests.
+The web toolchain requires Node 22.12 or newer, and CI/build images are pinned by digest.
+
+
+Build metadata readers require an explicit producer slug, expected image repository and full current
+commit SHA. They accept exactly one `image-metadata-<exact-slug>-<numeric-job-id>.json` file
+containing one BuildKit metadata object, with `image.name` equal to `<repository>:<full-SHA>`
+and a valid `containerimage.digest`. Mismatched names, commits, producer suffixes, job IDs or
+ambiguous documents fail before deploy writes (and before image scans where the reader is used).

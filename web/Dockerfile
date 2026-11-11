@@ -1,5 +1,5 @@
-# syntax=docker/dockerfile:1.7
-FROM node:22-alpine AS deps
+# syntax=docker/dockerfile:1.7@sha256:a57df69d0ea827fb7266491f2813635de6f17269be881f696fbfdf2d83dda33e
+FROM node:22-alpine@sha256:0e1754758c2df4cfa3e68d59e2e1b7374bb7fd9ea6328eaaacf15cc934af8202 AS deps
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm cache clean --force && npm ci --no-audit --no-fund
@@ -7,14 +7,14 @@ RUN npm cache clean --force && npm ci --no-audit --no-fund
 # version ever drops below the fixed release.
 RUN node -e "const [a,b,c]=require('./node_modules/picomatch/package.json').version.split('.').map(Number); const ok=a>4||(a===4&&(b>0||c>=4)); if(!ok){console.error('picomatch too old');process.exit(1)} console.log('picomatch OK')"
 
-FROM node:22-alpine AS builder
+FROM node:22-alpine@sha256:0e1754758c2df4cfa3e68d59e2e1b7374bb7fd9ea6328eaaacf15cc934af8202 AS builder
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 ENV NEXT_TELEMETRY_DISABLED=1
 RUN npm run build
 
-FROM node:22-alpine AS runner
+FROM node:22-alpine@sha256:0e1754758c2df4cfa3e68d59e2e1b7374bb7fd9ea6328eaaacf15cc934af8202 AS runner
 WORKDIR /app
 # API_BASE_URL is read at request time by src/app/api/[...path]/route.ts, so
 # the Deployment value takes effect without rebuilding the image.
