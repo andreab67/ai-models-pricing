@@ -9,6 +9,7 @@ resources:
   - configmap.yaml
   - api-deployment.yaml
   - api-service.yaml
+  - api-networkpolicy.yaml
   - web-deployment.yaml
   - web-service.yaml
   - httproute.yaml

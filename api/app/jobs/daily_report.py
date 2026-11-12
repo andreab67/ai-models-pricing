@@ -85,7 +85,9 @@ async def _main() -> int:
             ]
         )
         subject = f"[Pricing] Top 5 coding models — {generated_at}"
-        await send(subject, html, text)
+        if not await send(subject, html, text):
+            log.error("daily_report_not_sent", reason="SMTP unavailable or delivery declined")
+            return 1
         log.info(
             "daily_report_built",
             top_count=len(top5),

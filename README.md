@@ -308,7 +308,7 @@ Extend `api/app/jobs/daily_report.py` with:
 - **No secrets in code**: All credentials via environment or Kubernetes secrets
 - **TLS everywhere**: terminated at the Traefik Gateway with a home-lab CA certificate
 - **Audit logging**: All API requests logged with timestamp, user, and response
-- **CORS**: Configured for same-origin requests only
+- **CORS**: Configured origins, read-only GET, and no credential sharing. See [API exposure and activation gates](docs/api-exposure.md).
 - **Rate limiting**: Optional throttling via middleware (not enabled by default)
 - **Input validation**: Pydantic schemas enforce types and ranges
 
