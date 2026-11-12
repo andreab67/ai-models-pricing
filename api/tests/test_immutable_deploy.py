@@ -94,7 +94,13 @@ esac
 """
 
 
-def _run_deploy(tmp_path: Path, fail_rollout: bool = False, invalid_metadata=None):
+def _run_deploy(
+    tmp_path: Path,
+    fail_rollout: bool = False,
+    invalid_metadata=None,
+    fail_smoke=False,
+    smoke_code="200",
+):
     helper = ROOT / "scripts/deploy-prod.sh"
     assert helper.is_file()
     bindir = tmp_path / "bin"
@@ -102,6 +108,12 @@ def _run_deploy(tmp_path: Path, fail_rollout: bool = False, invalid_metadata=Non
     fake = bindir / "kubectl"
     fake.write_text(_FAKE_KUBECTL)
     fake.chmod(0o755)
+    curl = bindir / "curl"
+    curl.write_text(
+        '#!/bin/bash\nprintf "curl %s\\n" "$*" >> "$CALL_LOG"\n'
+        '[ "$FAIL_SMOKE" = 0 ] && printf "%s" "$SMOKE_CODE"\nexit "$FAIL_SMOKE"\n'
+    )
+    curl.chmod(0o755)
     api_ref = API + "@sha256:" + "d" * 64
     web_ref = WEB + "@sha256:" + "e" * 64
     for producer, digit in [("build-api", "d"), ("build-web", "e")]:
@@ -138,6 +150,8 @@ def _run_deploy(tmp_path: Path, fail_rollout: bool = False, invalid_metadata=Non
         "DEPLOY_RENDERED_FILE": str(tmp_path / "rendered.yaml"),
         "CALL_LOG": str(log),
         "FAIL_ROLLOUT": "1" if fail_rollout else "0",
+        "FAIL_SMOKE": "1" if fail_smoke else "0",
+        "SMOKE_CODE": smoke_code,
         "EXPECTED_API": api_ref,
         "EXPECTED_WEB": web_ref,
     }
@@ -160,7 +174,7 @@ def test_deploy_changes_only_images_and_waits_before_cronjobs(
     proc, calls = _run_deploy(tmp_path, fail_rollout)
     api_ref = API + "@sha256:" + "d" * 64
     assert f"set image deployment/api migrate={api_ref} api={api_ref} -n model-pricing" in calls
-    assert all(c.startswith(("set image ", "rollout ", "get ")) for c in calls)
+    assert all(c.startswith(("set image ", "rollout ", "get ", "curl ")) for c in calls)
     cron = [i for i, c in enumerate(calls) if c.startswith("set image cronjob/")]
     if fail_rollout:
         assert proc.returncode == 1
@@ -254,3 +268,27 @@ def test_wrong_build_identity_stops_real_deploy_before_writes(tmp_path, producer
         for call in calls
         for token in (" apply ", " patch ", " set image ", " rollout ")
     )
+
+
+@pytest.mark.parametrize("failure", [False, True])
+def test_post_rollout_smoke_uses_bounded_public_proxy(tmp_path, failure):
+    proc, calls = _run_deploy(tmp_path, fail_smoke=failure)
+    smoke = [c for c in calls if c.startswith("curl ")]
+    assert len(smoke) == 1
+    assert "--fail" in smoke[0] and "--max-time 20" in smoke[0]
+    assert "https://models.andrea-house.com/api/healthz" in smoke[0]
+    assert calls[-1] == smoke[0]
+    assert proc.returncode == (1 if failure else 0)
+
+
+def test_rollout_failure_never_starts_http_smoke(tmp_path):
+    proc, calls = _run_deploy(tmp_path, fail_rollout=True)
+    assert proc.returncode == 1
+    assert not any(c.startswith("curl ") for c in calls)
+
+
+@pytest.mark.parametrize("status", ["302", "503"])
+def test_post_rollout_rejects_non_200_status(tmp_path, status):
+    proc, calls = _run_deploy(tmp_path, smoke_code=status)
+    assert proc.returncode != 0
+    assert calls[-1].startswith("curl ")

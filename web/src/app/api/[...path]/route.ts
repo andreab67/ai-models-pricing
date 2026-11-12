@@ -88,7 +88,7 @@ export async function GET(
 
     return NextResponse.json(
       { detail: timedOut ? "Upstream timeout" : "Upstream unavailable" },
-      { status: timedOut ? 504 : 502 },
+      { status: timedOut ? 504 : 502, headers: { "cache-control": "no-store" } },
     );
   }
 

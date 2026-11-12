@@ -26,9 +26,7 @@ def _patch_settings(monkeypatch, **overrides):
     """Override the cached Settings instance with test-only values."""
     from app.config import get_settings
 
-    settings = get_settings()
-    for k, v in overrides.items():
-        setattr(settings, k, v)
+    settings = get_settings().model_copy(update=overrides)
     monkeypatch.setattr(accounts, "_settings", settings)
     return settings
 
@@ -634,3 +632,19 @@ async def test_get_usage_returns_every_provider(monkeypatch):
         rec = getattr(out, name)
         assert rec.configured is True, f"{name}: not configured ({rec.error!r})"
         assert rec.error is None, f"{name}: surfaced error {rec.error!r}"
+
+
+def test_settings_helper_never_mutates_cached_settings(monkeypatch):
+    from app.config import get_settings
+    from app.services import openrouter
+
+    original = get_settings()
+    before = original.model_dump()
+    saved_accounts = accounts._settings
+    with monkeypatch.context() as scoped:
+        configured = _patch_settings(scoped, openrouter_api_key="isolated-test-value")
+        assert configured.openrouter_api_key == "isolated-test-value"
+        assert get_settings().model_dump() == before
+        assert openrouter._settings.model_dump() == before
+    assert accounts._settings is saved_accounts
+    assert get_settings().model_dump() == before

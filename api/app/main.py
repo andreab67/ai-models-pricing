@@ -97,16 +97,17 @@ app = FastAPI(
     title="Model Pricing API",
     version=__version__,
     lifespan=lifespan,
-    docs_url="/docs",
+    docs_url="/docs" if _settings.environment in {"dev", "test"} else None,
+    openapi_url="/openapi.json" if _settings.environment in {"dev", "test"} else None,
     redoc_url=None,
 )
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_settings.cors_origins,
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["GET"],
-    allow_headers=["*"],
+    allow_headers=["Accept", "Content-Type"],
 )
 app.add_middleware(MetricsMiddleware)
 

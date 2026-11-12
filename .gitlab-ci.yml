@@ -26,6 +26,7 @@ lint:web:
     - npm ci --no-audit --no-fund --prefer-offline --cache .npm
     - npm run lint
     - npm run typecheck
+    - npm test
   cache:
     key:
       files:
@@ -43,7 +44,7 @@ lint:api:
   script:
     - cd api
     - pip install --no-cache-dir --require-hashes -r requirements-dev.lock
-    - ruff check app tests
+    - ruff check app tests alembic ../ci/tests
   only:
     - merge_requests
     - main
@@ -53,13 +54,13 @@ test:api:
   tags: [k8s]
   image: python:3.14-slim@sha256:9aaa474097d094040649f2162a627c0049b408f52138d980916788d80f04802f
   script:
-    - apt-get update && apt-get install -y --no-install-recommends curl ca-certificates jq
+    - apt-get update && apt-get install -y --no-install-recommends curl ca-certificates openssl jq
     - sh ci/install-kustomize.sh
     - sh ci/install-kubectl.sh
     - cd api
     - pip install --no-cache-dir --require-hashes -r requirements-dev.lock
     - sh ../ci/check-locks.sh
-    - pytest tests -q --cov=app --cov-report=term-missing --cov-fail-under=60
+    - pytest tests ../ci/tests -q --cov=app --cov-report=term-missing --cov-fail-under=60
   only:
     - merge_requests
     - main
@@ -246,7 +247,7 @@ deploy:k8s:
   image: debian:stable-slim@sha256:fbfb4059d2127120aa05b6e6064523d2102552f0cf0026ddf0701c12f1f8f3e0
   resource_group: model-pricing-production
   before_script:
-    - apt-get update && apt-get install -y --no-install-recommends curl ca-certificates jq
+    - apt-get update && apt-get install -y --no-install-recommends curl ca-certificates openssl jq
     - sh ci/install-kubectl.sh
     - sh ci/install-kustomize.sh
   needs:
@@ -264,6 +265,7 @@ deploy:k8s:
     name: production
     url: https://models.andrea-house.com
   script:
+    - source ci/prepare-deploy-trust.sh https://models.andrea-house.com/api/healthz
     - echo "${KUBE_CONFIG}" | base64 -d > /tmp/kubeconfig
     - export KUBECONFIG=/tmp/kubeconfig
     - bash scripts/deploy-prod.sh

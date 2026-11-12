@@ -15,8 +15,8 @@ dependencies = [
   "alembic>=1.15.0",
   "redis==5.2.0",
   "PyYAML==6.0.3",
-  "aiosmtplib==3.0.2",
-  "Jinja2==3.1.4",
+  "aiosmtplib==5.1.2",
+  "Jinja2==3.1.6",
   "beautifulsoup4==4.12.3",
   "structlog==24.4.0",
   "prometheus-client==0.21.0",
@@ -25,8 +25,8 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
-  "pytest==8.3.3",
-  "pytest-asyncio==0.24.0",
+  "pytest==9.0.3",
+  "pytest-asyncio==1.4.1.post1",
   "ruff==0.17.3",
   "mypy==1.13.0",
   "respx==0.21.1",

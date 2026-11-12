@@ -5,3 +5,4 @@ test -r /etc/ssl/certs/ca-certificates.crt
 cat /etc/ssl/certs/ca-certificates.crt > /tmp/registry-ca-bundle.pem
 printf '%s\n' "$ADDITIONAL_CA_CERT_BUNDLE" >> /tmp/registry-ca-bundle.pem
 export SSL_CERT_FILE=/tmp/registry-ca-bundle.pem
+export CURL_CA_BUNDLE="$SSL_CERT_FILE"

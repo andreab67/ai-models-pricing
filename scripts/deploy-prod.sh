@@ -22,8 +22,10 @@ kubectl rollout status deployment/api -n model-pricing --timeout=120s || api_rc=
 kubectl rollout status deployment/web -n model-pricing --timeout=120s || web_rc=$?
 if [[ "$api_rc" != 0 || "$web_rc" != 0 ]]; then
     echo "Rollout failed; reverting to previous revision" >&2
-    kubectl rollout undo deployment/api -n model-pricing || true
-    kubectl rollout undo deployment/web -n model-pricing || true
+    # Attempt both undo operations even if one fails; rollback failure must
+    # never hide the original rollout failure or allow scheduled-job updates.
+    kubectl rollout undo deployment/api -n model-pricing || echo "API rollback failed" >&2
+    kubectl rollout undo deployment/web -n model-pricing || echo "Web rollback failed" >&2
     exit 1
 fi
 # Move scheduled jobs only after the API migration and both rollouts are ready.
@@ -44,3 +46,7 @@ verify deployment/web '{.spec.template.spec.containers[0].image}' "$web"
 for job in refresh-pricing daily-report kilo-diff; do
     verify "cronjob/$job" '{.spec.jobTemplate.spec.template.spec.containers[0].image}' "$api"
 done
+
+# Exercise the same public same-origin proxy used by the dashboard. This runs
+# only in the deploy job after its required lint/test/scan jobs and both rollouts.
+sh "$repo/ci/healthcheck.sh" https://models.andrea-house.com/api/healthz
