@@ -13,8 +13,10 @@ from typing import Any
 
 import httpx
 
+from app import observability
 from app.config import get_settings
 from app.logging import get_logger
+from app.prompt_context import PromptContext
 from app.schemas import (
     KiloBonusGrowth,
     KiloExtractedPricing,
@@ -67,14 +69,33 @@ Percentages are fractions (50% -> 0.50), not whole numbers.
 """
 
 
-def _build_request_payload(page_text: str) -> dict[str, Any]:
+def _capture_context() -> PromptContext:
+    return PromptContext.capture(
+        "model-pricing",
+        "kilo-price-primitives",
+        "api/app/services/kilo_extract.py:_SYSTEM_PROMPT;api/app/schemas.py:KiloPricePrimitives",
+        None,
+        {
+            "system": _SYSTEM_PROMPT,
+            "wire_response_format": json.dumps(
+                {"type": "json_object"}, sort_keys=True, separators=(",", ":")
+            ),
+            "local_validation_schema": json.dumps(
+                KiloPricePrimitives.model_json_schema(), sort_keys=True, separators=(",", ":")
+            ),
+        },
+    )
+
+
+def _build_request_payload(page_text: str, context: PromptContext | None = None) -> dict[str, Any]:
+    context = context or _capture_context()
     # No sampling parameters: Haiku 5.5 rejects non-default temperature/top_p/top_k
     # and OpenRouter lists none of them as supported for it.
     return {
         "model": _settings.kilo_extraction_model,
-        "response_format": {"type": "json_object"},
+        "response_format": json.loads(context.text("wire_response_format")),
         "messages": [
-            {"role": "system", "content": _SYSTEM_PROMPT},
+            {"role": "system", "content": context.text("system")},
             {"role": "user", "content": page_text},
         ],
     }
@@ -131,10 +152,13 @@ def reconstruct(primitives: KiloPricePrimitives) -> KiloExtractedPricing:
 async def extract_pricing(page_text: str) -> KiloExtractedPricing:
     url = f"{_settings.openrouter_base_url}/chat/completions"
     headers = {"Authorization": f"Bearer {_settings.openrouter_api_key}"}
-    async with httpx.AsyncClient(timeout=60.0, headers=headers) as client:
-        resp = await client.post(url, json=_build_request_payload(page_text))
-        resp.raise_for_status()
-        primitives = _parse_primitives(resp.json())
+    context = _capture_context()
+    payload = _build_request_payload(page_text, context)
+    with observability.generation(context, payload["model"]):
+        async with httpx.AsyncClient(timeout=60.0, headers=headers) as client:
+            resp = await client.post(url, json=payload)
+            resp.raise_for_status()
+            primitives = _parse_primitives(resp.json())
     return reconstruct(primitives)
 
 

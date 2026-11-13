@@ -22,6 +22,7 @@ spec:
               envFrom:
                 - configMapRef: { name: model-pricing-config }
                 - secretRef:    { name: ses-creds }
+                - secretRef: { name: langfuse-context-tracing }
               env:
                 - name: DATABASE_URL
                   valueFrom:

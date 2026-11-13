@@ -22,11 +22,14 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 # --only-upgrade zlib1g: pick up the fixed zlib1g even when the base image is
 # older than the Debian security update (trivy gate: HIGH CVEs with a fix).
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        curl \
+        curl ca-certificates \
     && apt-get install -y --only-upgrade zlib1g \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --gid 1000 app \
     && useradd --uid 1000 --gid 1000 --no-create-home --home-dir /app app
+
+COPY certs/andrea-ca.crt /usr/local/share/ca-certificates/andrea-ca.crt
+RUN update-ca-certificates
 
 WORKDIR /app
 COPY --from=builder /wheels /wheels
