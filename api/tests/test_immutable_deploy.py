@@ -1,4 +1,4 @@
-"""Real Kustomize rendering and image-only rollout ordering, without cluster access."""
+"""Real rendering and scoped image/context rollout ordering, without cluster access."""
 
 from __future__ import annotations
 
@@ -86,6 +86,13 @@ case "$1" in
   rollout)
     if [ "$2" = status ] && [ "$FAIL_ROLLOUT" = 1 ]; then exit 1; fi ;;
   get)
+    if [ "$2" = secret ]; then printf 'secret/langfuse-context-tracing'; exit 0; fi
+    if [ "$2" = cronjob/kilo-diff ] && [ "$6" = json ]; then
+      printf '%s' '{"metadata":{"resourceVersion":"1"},"spec":{"jobTemplate":{"spec":{
+        "template":{"spec":{"containers":[{"name":"diff","envFrom":[{
+        "secretRef":{"name":"langfuse-context-tracing"}}]}]}}}}}}'
+      exit 0
+    fi
     case "$2" in
       deployment/web) printf '%s' "$EXPECTED_WEB" ;;
       *) printf '%s' "$EXPECTED_API" ;;
@@ -168,7 +175,7 @@ def _run_deploy(
 
 
 @pytest.mark.parametrize("fail_rollout", [False, True])
-def test_deploy_changes_only_images_and_waits_before_cronjobs(
+def test_deploy_changes_scoped_images_context_and_waits_before_cronjobs(
     tmp_path: Path, fail_rollout: bool
 ) -> None:
     proc, calls = _run_deploy(tmp_path, fail_rollout)
@@ -184,6 +191,8 @@ def test_deploy_changes_only_images_and_waits_before_cronjobs(
         assert proc.returncode == 0, proc.stderr
         assert len(cron) == 3
         assert max(i for i, c in enumerate(calls) if "rollout status " in c) < min(cron)
+        context = calls.index("get secret langfuse-context-tracing -n model-pricing -o name")
+        assert max(i for i, c in enumerate(calls) if "rollout status " in c) < context < min(cron)
         assert not any("rollout undo" in c for c in calls)
 
 

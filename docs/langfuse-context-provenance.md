@@ -24,8 +24,24 @@ with project Basic authentication and x-langfuse-ingestion-version:4. Export is
 asynchronous, queue 128, batch 16, timeout 2 seconds. The dedicated provider has
 no automatic shutdown hook; the application joins only its own daemon shutdown
 worker for at most 2 seconds. No global provider or unrelated callback is changed.
-The Docker build installs the two new pyproject dependencies; this repository has
-no Python lockfile. Deployment owns project keys, identity and mounted CA bundle.
+The Docker build installs the pinned dependencies from the canonical Python
+lockfile and adds the private CA to the system trust bundle. Deployment owns the
+project keys, identity and LANGFUSE_CA_FILE reference to that verified bundle.
 
 Validation uses mock provider responses, an in-memory native exporter and a
 stalled local OTLP receiver. No live extraction, pricing commit or email is run.
+
+## Deployment activation
+
+The deployment helper preserves operator-owned workload fields and explicitly
+merges only the unprefixed `langfuse-context-tracing` Secret reference into the
+`kilo-diff` container's `envFrom` list, last. A resource-version JSON Patch test
+rejects concurrent changes, and a live readback verifies the reference. Explicit
+operator `LANGFUSE_*` environment variables fail this step because they would
+override the Secret. Other Secrets, schedules, suspension, containers and
+annotations remain unchanged. This does not run the scheduled pricing task.
+
+The final HTTPS health check accepts only HTTP 200. It retries 502/503/504 up to
+five GET attempts, with a 20-second per-attempt limit and two seconds between
+attempts (at most 108 seconds). Redirects, authorization and certificate errors
+still fail immediately.

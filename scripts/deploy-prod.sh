@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Image-only deploy: preserve operator-owned fields outside the image references.
+# Image deploy plus the explicitly owned kilo-diff context Secret reference.
+# Preserve all other operator-owned fields.
 # kubectl set image supports Deployments, init containers and CronJobs:
 # https://kubernetes.io/docs/reference/kubectl/generated/kubectl_set/kubectl_set_image/
 set -euo pipefail
@@ -29,6 +30,7 @@ if [[ "$api_rc" != 0 || "$web_rc" != 0 ]]; then
     exit 1
 fi
 # Move scheduled jobs only after the API migration and both rollouts are ready.
+bash "$repo/scripts/activate-context-tracing.sh"
 kubectl set image cronjob/refresh-pricing "refresh=$api" -n model-pricing
 kubectl set image cronjob/daily-report "report=$api" -n model-pricing
 kubectl set image cronjob/kilo-diff "diff=$api" -n model-pricing
