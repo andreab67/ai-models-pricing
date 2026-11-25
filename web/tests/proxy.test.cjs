@@ -110,26 +110,35 @@ test("explicit account opt-in forwards both paths without caching", async () => 
 });
 
 test("OpenAI Projects requires both opt-ins and is never cached", async () => {
-  const path = ["accounts", "openai-projects"];
+  const paths = [["accounts", "openai-projects"], ["accounts", "openai-models"],
+                 ["accounts", "openai-projects", "proj_basic", "usage"]];
 
   for (const [accounts, projects] of [["true", "false"], ["false", "true"]]) {
     process.env.EXPOSE_ACCOUNT_DATA = accounts;
     process.env.EXPOSE_OPENAI_PROJECTS = projects;
     const calls = stub();
-    const denied = await request(path);
-    assert.equal(denied.status, 404);
-    assert.equal(denied.headers.get("cache-control"), "no-store");
+
+    for (const path of paths) {
+      const denied = await request(path);
+      assert.equal(denied.status, 404);
+      assert.equal(denied.headers.get("cache-control"), "no-store");
+    }
+
     assert.equal(calls.length, 0);
   }
 
   process.env.EXPOSE_ACCOUNT_DATA = "true";
   process.env.EXPOSE_OPENAI_PROJECTS = "true";
-  const calls = stub();
-  const response = await request(path);
-  assert.equal(response.status, 200);
-  assert.equal(response.headers.get("cache-control"), "no-store");
-  assert.equal(calls.length, 1);
-  assert.equal(calls[0][0].pathname, "/accounts/openai-projects");
+
+  for (const path of paths) {
+    const calls = stub();
+    const response = await request(path);
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get("cache-control"), "no-store");
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0][0].pathname, `/${path.join("/")}`);
+  }
+
   process.env.EXPOSE_ACCOUNT_DATA = "false";
   process.env.EXPOSE_OPENAI_PROJECTS = "false";
 });

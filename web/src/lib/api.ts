@@ -535,6 +535,78 @@ export function useOpenAIProjects() {
   });
 }
 
+export interface OpenAIUsageRow {
+  model: string | null;
+  service_tier: string | null;
+  requests: number;
+  input_tokens: number;
+  output_tokens: number;
+}
+
+export interface OpenAIProjectUsage {
+  period_start: string;
+  rows: OpenAIUsageRow[];
+}
+
+function isOpenAIUsageRow(v: unknown): v is OpenAIUsageRow {
+  return (
+    isObject(v) &&
+    "model" in v &&
+    isNullableString(v.model) &&
+    "service_tier" in v &&
+    isNullableString(v.service_tier) &&
+    "requests" in v &&
+    typeof v.requests === "number" &&
+    Number.isSafeInteger(v.requests) &&
+    v.requests >= 0 &&
+    "input_tokens" in v &&
+    typeof v.input_tokens === "number" &&
+    Number.isSafeInteger(v.input_tokens) &&
+    v.input_tokens >= 0 &&
+    "output_tokens" in v &&
+    typeof v.output_tokens === "number" &&
+    Number.isSafeInteger(v.output_tokens) &&
+    v.output_tokens >= 0
+  );
+}
+
+export function useOpenAIModels() {
+  return useSWR(
+    "/api/accounts/openai-models",
+    async (url: string): Promise<string[]> => {
+      const body = await fetcher<unknown>(url);
+
+      if (!isObject(body) || !("models" in body) || !isStringArray(body.models))
+        throw new Error("Unexpected response from API");
+
+      return body.models;
+    },
+    { ...accountConfig, refreshInterval: 900_000 },
+  );
+}
+
+export function useOpenAIProjectUsage(projectId: string) {
+  return useSWR(
+    `/api/accounts/openai-projects/${encodeURIComponent(projectId)}/usage`,
+    async (url: string): Promise<OpenAIProjectUsage> => {
+      const body = await fetcher<unknown>(url);
+
+      if (
+        !isObject(body) ||
+        !("period_start" in body) ||
+        !isCalendarDate(body.period_start) ||
+        !("rows" in body) ||
+        !Array.isArray(body.rows) ||
+        !body.rows.every(isOpenAIUsageRow)
+      )
+        throw new Error("Unexpected response from API");
+
+      return { period_start: body.period_start, rows: body.rows };
+    },
+    { ...accountConfig, refreshInterval: 900_000 },
+  );
+}
+
 export function useKiloModels() {
   return useSWR<ModelPricing[]>("/api/kilo/models", fetcher, {
     ...defaultConfig,
