@@ -114,12 +114,12 @@ async def _project_list(client: httpx.AsyncClient) -> list[_Project]:
 
 async def _project_costs(
     client: httpx.AsyncClient, month_start: datetime, now: datetime
-) -> dict[str, float]:
+) -> dict[str | None, float]:
     # end_time is exclusive. An empty interval can only occur in the first
     # whole second of a new month, when there is no spend to query yet.
     start = int(month_start.timestamp())
     end = int(now.timestamp())
-    costs: dict[str, float] = {}
+    costs: dict[str | None, float] = {}
     if start == end:
         return costs
 
@@ -138,11 +138,10 @@ async def _project_costs(
         page = _Page[_CostBucket].model_validate_json(response.content)
         for bucket in page.data:
             for cost in bucket.results:
-                if cost.project_id is not None:
-                    total = costs.get(cost.project_id, 0.0) + cost.amount.value
-                    if not math.isfinite(total):
-                        raise _InvalidPage("OpenAI project costs overflowed")
-                    costs[cost.project_id] = total
+                total = costs.get(cost.project_id, 0.0) + cost.amount.value
+                if not math.isfinite(total):
+                    raise _InvalidPage("OpenAI project costs overflowed")
+                costs[cost.project_id] = total
         if not page.has_more:
             return costs
         cursor = page.next_page
@@ -264,7 +263,7 @@ async def get_projects(admin_key: str) -> OpenAIProjectsResponse:
     month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
     # A deployment that changes credentials must not serve the old org's cache.
     key_digest = hashlib.sha256(admin_key.encode()).hexdigest()
-    cache_key = f"accounts:openai-projects:{key_digest}"
+    cache_key = f"accounts:openai-projects:v2:{key_digest}"
     cached = await cache.get(cache_key)
     if cached is not None:
         try:
@@ -287,10 +286,12 @@ async def get_projects(admin_key: str) -> OpenAIProjectsResponse:
 
         try:
             async with asyncio.timeout(_UPSTREAM_TIMEOUT_SECONDS):
-                costs = await _project_costs(client, month_start, now) if projects else {}
-        except _UPSTREAM_ERRORS as exc:
+                costs = await _project_costs(client, month_start, now)
+            total_spend = math.fsum(costs.values())
+        except (*_UPSTREAM_ERRORS, OverflowError) as exc:
             log.warning("openai_project_costs_unavailable", error_type=type(exc).__name__)
             costs = None
+            total_spend = None
 
     result = OpenAIProjectsResponse(
         projects=[
@@ -305,6 +306,7 @@ async def get_projects(admin_key: str) -> OpenAIProjectsResponse:
         ],
         period_start=month_start.date(),
         spend_available=costs is not None,
+        total_spend_usd=total_spend,
     )
     if result.spend_available:
         await cache.set(cache_key, result.model_dump(mode="json"), ttl=_CACHE_TTL_SECONDS)

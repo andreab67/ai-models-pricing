@@ -500,6 +500,7 @@ export interface OpenAIProjectsResponse {
   projects: OpenAIProject[];
   period_start: string;
   spend_available: boolean;
+  total_spend_usd?: number | null;
 }
 
 function isOpenAIProject(v: unknown): v is OpenAIProject {
@@ -517,7 +518,8 @@ function isOpenAIProjectsResponse(v: unknown): v is OpenAIProjectsResponse {
   return isObject(v) &&
     "projects" in v && Array.isArray(v.projects) && v.projects.every(isOpenAIProject) &&
     "period_start" in v && isCalendarDate(v.period_start) &&
-    "spend_available" in v && typeof v.spend_available === "boolean";
+    "spend_available" in v && typeof v.spend_available === "boolean" &&
+    (!("total_spend_usd" in v) || isNullableNumber(v.total_spend_usd));
 }
 
 const openAIProjectsFetcher = async (url: string): Promise<OpenAIProjectsResponse> => {
@@ -567,21 +569,6 @@ function isOpenAIUsageRow(v: unknown): v is OpenAIUsageRow {
     typeof v.output_tokens === "number" &&
     Number.isSafeInteger(v.output_tokens) &&
     v.output_tokens >= 0
-  );
-}
-
-export function useOpenAIModels() {
-  return useSWR(
-    "/api/accounts/openai-models",
-    async (url: string): Promise<string[]> => {
-      const body = await fetcher<unknown>(url);
-
-      if (!isObject(body) || !("models" in body) || !isStringArray(body.models))
-        throw new Error("Unexpected response from API");
-
-      return body.models;
-    },
-    { ...accountConfig, refreshInterval: 900_000 },
   );
 }
 

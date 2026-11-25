@@ -12,7 +12,6 @@ import {
   isNotExposed,
   useAccountUsage,
   useActivity,
-  useOpenAIModels,
   useOpenAIProjects,
   useOpenAIProjectUsage,
   type AccountProviderUsage,
@@ -627,37 +626,6 @@ function ProjectUsageDialog({
   );
 }
 
-function OpenAIModels() {
-  const { data, error } = useOpenAIModels();
-
-  return (
-    <div className="space-y-1">
-      <h4 className="text-xs font-semibold">Available models</h4>
-      {error ? (
-        <p className="text-xs text-muted">
-          {error instanceof ApiError && error.status === 503
-            ? "OpenAI project API key is not configured."
-            : error instanceof ApiError && error.status === 404
-              ? "Live model data isn’t enabled."
-              : "Unable to load OpenAI models."}
-        </p>
-      ) : !data ? (
-        <p className="text-xs text-muted" role="status">
-          Loading models…
-        </p>
-      ) : data.length === 0 ? (
-        <p className="text-xs text-muted">No models available.</p>
-      ) : (
-        <ul className="max-h-32 overflow-y-auto text-xs font-mono text-fg/80">
-          {data.map((model) => (
-            <li key={model}>{model}</li>
-          ))}
-        </ul>
-      )}
-    </div>
-  );
-}
-
 function OpenAIProjectsCard() {
   const { data, error } = useOpenAIProjects();
 
@@ -672,7 +640,6 @@ function OpenAIProjectsCard() {
       aria-labelledby="openai-projects-heading"
     >
       <h3 id="openai-projects-heading" className="font-semibold text-emerald-400">OpenAI</h3>
-      {!disabled && <OpenAIModels />}
       {disabled ? (
         <p className="text-xs text-muted">Live OpenAI data isn’t enabled.</p>
       ) : error ? (
@@ -687,6 +654,12 @@ function OpenAIProjectsCard() {
         </p>
       ) : (
         <>
+          <dl className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+            <dt className="text-sm text-muted">Total month-to-date cost</dt>
+            <dd className="text-xl font-semibold tabular-nums">
+              {fmtUsdOrDash(data.total_spend_usd ?? null)}
+            </dd>
+          </dl>
           <h4 className="text-xs font-semibold">Active projects</h4>
           <p className="text-xs text-muted">
             Since {fmtCalendarDate(data.period_start)} (UTC)
