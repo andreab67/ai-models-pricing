@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import {
   ActivityContractError,
@@ -12,11 +12,14 @@ import {
   isNotExposed,
   useAccountUsage,
   useActivity,
+  useOpenAIModels,
   useOpenAIProjects,
+  useOpenAIProjectUsage,
   type AccountProviderUsage,
   type ActivityGroupBy,
   type ActivityPeriod,
   type ActivityPeriodKey,
+  type OpenAIProject,
 } from "@/lib/api";
 
 // ---------------------------------------------------------------------------
@@ -514,23 +517,164 @@ function OpenRouterActivityTable() {
 // Public component: grid of provider cards.
 // ---------------------------------------------------------------------------
 
-function OpenAIProjectsCard() {
-  const { data, error } = useOpenAIProjects();
-  const disabled = error instanceof ApiError && error.status === 404;
+function ProjectUsageDialog({
+  project,
+  spendPeriodStart,
+  onClose,
+}: {
+  project: OpenAIProject;
+  spendPeriodStart: string;
+  onClose: () => void;
+}) {
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  const { data, error } = useOpenAIProjectUsage(project.id);
+  useEffect(() => {
+    const dialog = dialogRef.current;
+
+    if (dialog && !dialog.open) dialog.showModal();
+  }, []);
 
   return (
-    <section className="rounded-lg border border-border bg-card p-4 space-y-3" aria-labelledby="openai-projects-heading">
-      <div className="flex flex-wrap items-start justify-between gap-2">
-        <div>
-          <h3 id="openai-projects-heading" className="font-semibold text-emerald-400">OpenAI Projects</h3>
-          <p className="text-[10px] text-muted/70 uppercase tracking-wider mt-0.5">Active organization projects</p>
-        </div>
-        <a href="https://platform.openai.com/settings/organization/projects" target="_blank" rel="noopener noreferrer" className="text-xs text-muted underline hover:text-fg">
-          View in OpenAI ↗
-        </a>
+    <dialog
+      ref={dialogRef}
+      onClose={onClose}
+      aria-labelledby="project-usage-title"
+      className="w-[min(95vw,56rem)] max-h-[85vh] rounded-lg border border-border bg-card p-5 text-fg backdrop:bg-black/70"
+    >
+      <div className="flex justify-between gap-4">
+        <h3 id="project-usage-title" className="font-semibold">
+          Usage: {project.name || project.id}
+        </h3>
+        <button type="button" onClick={() => dialogRef.current?.close()} className="text-sm underline">
+          Close
+        </button>
       </div>
+      <p className="mt-2 text-xs text-muted">
+        Project spend since {fmtCalendarDate(spendPeriodStart)} (UTC) · {fmtUsdOrDash(project.spend_usd)}
+      </p>
+      {error ? (
+        <p role="alert" className="mt-3 text-sm text-red-400">
+          Unable to load project usage.
+        </p>
+      ) : !data ? (
+        <p role="status" className="mt-3 text-sm text-muted">
+          Loading usage…
+        </p>
+      ) : (
+        <>
+          <p className="mt-2 text-xs text-muted">
+            Completions usage since {fmtCalendarDate(data.period_start)} (UTC)
+          </p>
+          {data.rows.length === 0 ? (
+            <p className="mt-3 text-sm text-muted">No usage in this period.</p>
+          ) : (
+            <div className="mt-3 overflow-x-auto">
+              <table
+                className="w-full text-xs"
+                aria-label="Project usage by model and service tier"
+              >
+                <thead>
+                  <tr className="border-b border-border text-muted">
+                    <th scope="col" className="text-left p-2">
+                      Model
+                    </th>
+                    <th scope="col" className="text-left p-2">
+                      Service tier
+                    </th>
+                    <th scope="col" className="text-right p-2">
+                      Requests
+                    </th>
+                    <th scope="col" className="text-right p-2">
+                      Input tokens
+                    </th>
+                    <th scope="col" className="text-right p-2">
+                      Output tokens
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.rows.map((row) => (
+                    <tr
+                      key={JSON.stringify([row.model, row.service_tier])}
+                      className="border-b border-border/40"
+                    >
+                      <td className="p-2 font-mono">
+                        {row.model ?? "Unreported"}
+                      </td>
+                      <td className="p-2">
+                        {row.service_tier?.toLowerCase() === "flex" ? (
+                          <span className="font-semibold text-emerald-400">Flex</span>
+                        ) : (row.service_tier ?? "Unreported")}
+                      </td>
+                      <td className="p-2 text-right">
+                        {fmtCount(row.requests)}
+                      </td>
+                      <td className="p-2 text-right">
+                        {fmtCount(row.input_tokens)}
+                      </td>
+                      <td className="p-2 text-right">
+                        {fmtCount(row.output_tokens)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </>
+      )}
+    </dialog>
+  );
+}
+
+function OpenAIModels() {
+  const { data, error } = useOpenAIModels();
+
+  return (
+    <div className="space-y-1">
+      <h4 className="text-xs font-semibold">Available models</h4>
+      {error ? (
+        <p className="text-xs text-muted">
+          {error instanceof ApiError && error.status === 503
+            ? "OpenAI project API key is not configured."
+            : error instanceof ApiError && error.status === 404
+              ? "Live model data isn’t enabled."
+              : "Unable to load OpenAI models."}
+        </p>
+      ) : !data ? (
+        <p className="text-xs text-muted" role="status">
+          Loading models…
+        </p>
+      ) : data.length === 0 ? (
+        <p className="text-xs text-muted">No models available.</p>
+      ) : (
+        <ul className="max-h-32 overflow-y-auto text-xs font-mono text-fg/80">
+          {data.map((model) => (
+            <li key={model}>{model}</li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+function OpenAIProjectsCard() {
+  const { data, error } = useOpenAIProjects();
+
+  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
+
+  const disabled = error instanceof ApiError && error.status === 404;
+  const selectedProject = data?.projects.find((project) => project.id === selectedProjectId);
+
+  return (
+    <section
+      className="rounded-lg border border-border bg-card p-4 space-y-3"
+      aria-labelledby="openai-projects-heading"
+    >
+      <h3 id="openai-projects-heading" className="font-semibold text-emerald-400">OpenAI</h3>
+      {!disabled && <OpenAIModels />}
       {disabled ? (
-        <p className="text-xs text-muted">Live project data isn’t enabled.</p>
+        <p className="text-xs text-muted">Live OpenAI data isn’t enabled.</p>
       ) : error ? (
         <p className="text-xs text-red-400" role="alert">
           {error instanceof ApiError && error.status === 503
@@ -538,9 +682,12 @@ function OpenAIProjectsCard() {
             : "Unable to load OpenAI projects."}
         </p>
       ) : !data ? (
-        <p className="text-xs text-muted" role="status">Loading projects…</p>
+        <p className="text-xs text-muted" role="status">
+          Loading projects…
+        </p>
       ) : (
         <>
+          <h4 className="text-xs font-semibold">Active projects</h4>
           <p className="text-xs text-muted">
             Since {fmtCalendarDate(data.period_start)} (UTC)
             {!data.spend_available && " · Spend data unavailable"}
@@ -549,24 +696,72 @@ function OpenAIProjectsCard() {
             <p className="text-xs text-muted">No active projects.</p>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full text-xs" aria-label="Active OpenAI projects">
+              <table
+                className="w-full text-xs"
+                aria-label="Active OpenAI projects"
+              >
                 <thead>
                   <tr className="text-muted border-b border-border">
-                    <th scope="col" className="text-left font-normal pb-1.5 pr-4">Project</th>
-                    <th scope="col" className="text-left font-normal pb-1.5 pr-4">ID</th>
-                    <th scope="col" className="text-left font-normal pb-1.5 pr-4">Residency</th>
-                    <th scope="col" className="text-left font-normal pb-1.5 pr-4">Created (UTC)</th>
-                    <th scope="col" className="text-right font-normal pb-1.5 whitespace-nowrap">Month-to-date spend</th>
+                    <th
+                      scope="col"
+                      className="text-left font-normal pb-1.5 pr-4"
+                    >
+                      Project
+                    </th>
+                    <th
+                      scope="col"
+                      className="text-left font-normal pb-1.5 pr-4"
+                    >
+                      ID
+                    </th>
+                    <th
+                      scope="col"
+                      className="text-left font-normal pb-1.5 pr-4"
+                    >
+                      Residency
+                    </th>
+                    <th
+                      scope="col"
+                      className="text-left font-normal pb-1.5 pr-4"
+                    >
+                      Created (UTC)
+                    </th>
+                    <th
+                      scope="col"
+                      className="text-right font-normal pb-1.5 whitespace-nowrap"
+                    >
+                      Month-to-date spend
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
                   {data.projects.map((project) => (
-                    <tr key={project.id} className="border-b border-border/40 last:border-0">
-                      <td className="py-1.5 pr-4 text-fg/80">{project.name || "—"}</td>
-                      <td className="py-1.5 pr-4 font-mono text-fg/80">{project.id}</td>
-                      <td className="py-1.5 pr-4 whitespace-nowrap">{project.residency || "—"}</td>
-                      <td className="py-1.5 pr-4 whitespace-nowrap">{project.created_at.slice(0, 10)}</td>
-                      <td className="py-1.5 text-right font-mono whitespace-nowrap">{fmtUsdOrDash(project.spend_usd)}</td>
+                    <tr
+                      key={project.id}
+                      className="border-b border-border/40 last:border-0"
+                    >
+                      <td className="py-1.5 pr-4 text-fg/80">
+                        <button
+                          type="button"
+                          aria-haspopup="dialog"
+                          className="text-left underline hover:text-fg"
+                          onClick={() => setSelectedProjectId(project.id)}
+                        >
+                          {project.name || project.id}
+                        </button>
+                      </td>
+                      <td className="py-1.5 pr-4 font-mono text-fg/80">
+                        {project.id}
+                      </td>
+                      <td className="py-1.5 pr-4 whitespace-nowrap">
+                        {project.residency || "—"}
+                      </td>
+                      <td className="py-1.5 pr-4 whitespace-nowrap">
+                        {project.created_at.slice(0, 10)}
+                      </td>
+                      <td className="py-1.5 text-right font-mono whitespace-nowrap">
+                        {fmtUsdOrDash(project.spend_usd)}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -574,6 +769,13 @@ function OpenAIProjectsCard() {
             </div>
           )}
         </>
+      )}
+      {data && selectedProject && (
+        <ProjectUsageDialog
+          project={selectedProject}
+          spendPeriodStart={data.period_start}
+          onClose={() => setSelectedProjectId(null)}
+        />
       )}
     </section>
   );

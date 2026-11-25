@@ -22,6 +22,23 @@ class OpenAIProjectsResponse(BaseModel):
     spend_available: bool
 
 
+class OpenAIModelsResponse(BaseModel):
+    models: list[str]
+
+
+class OpenAIModelUsage(BaseModel):
+    model: str | None
+    service_tier: str | None
+    requests: int
+    input_tokens: int
+    output_tokens: int
+
+
+class OpenAIProjectUsageResponse(BaseModel):
+    period_start: date
+    rows: list[OpenAIModelUsage]
+
+
 class ModelPricing(BaseModel):
     """Normalized model pricing record returned by the API."""
 
