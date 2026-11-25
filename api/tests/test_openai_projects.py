@@ -102,7 +102,9 @@ async def test_projects_join_paginated_utc_month_to_date_costs_and_cache(app):
                         has_more=True, next_page="cost_cursor",
                     ))
                 case "cost_cursor":
-                    return httpx.Response(200, json=page({"results": [cost("proj_recent", 0.25)]}))
+                    return httpx.Response(200, json=page({"results": [
+                        cost("proj_recent", 0.25), cost("proj_archived", 3.25),
+                    ]}))
                 case unexpected:
                     pytest.fail(f"Unexpected cost cursor {unexpected}")
 
@@ -116,6 +118,7 @@ async def test_projects_join_paginated_utc_month_to_date_costs_and_cache(app):
     assert response.headers["cache-control"] == "no-store"
     result = response.json()
     assert result["spend_available"] is True
+    assert result["total_spend_usd"] == 44.0
     assert result["period_start"] == datetime.now(UTC).replace(day=1).date().isoformat()
     assert result["projects"] == [
         {
@@ -139,7 +142,21 @@ async def test_invalid_cost_response_keeps_projects_without_claiming_zero(app):
 
     assert response.status_code == 200, response.text
     assert response.json()["spend_available"] is False
+    assert response.json()["total_spend_usd"] is None
     assert response.json()["projects"][0]["spend_usd"] is None
+
+
+async def test_organization_costs_are_available_without_active_projects(app):
+    with respx.mock() as mock:
+        mock.get(f"{UPSTREAM}/projects").respond(200, json=page())
+        mock.get(f"{UPSTREAM}/costs").respond(
+            200, json=page({"results": [cost("proj_archived", 2.5), cost(None, -0.5)]}),
+        )
+        response = await request(app, key="test-admin-key-no-active-projects")
+
+    assert response.status_code == 200, response.text
+    assert response.json()["projects"] == []
+    assert response.json()["total_spend_usd"] == 2.0
 
 
 @pytest.mark.parametrize("status,body", [

@@ -20,6 +20,7 @@ class OpenAIProjectsResponse(BaseModel):
     projects: list[OpenAIProject]
     period_start: date
     spend_available: bool
+    total_spend_usd: FiniteFloat | None
 
 
 class OpenAIModelsResponse(BaseModel):

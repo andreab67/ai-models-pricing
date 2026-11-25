@@ -19,11 +19,11 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1
 
 # UID/GID 1000 matches the pods' securityContext (runAsUser/runAsGroup 1000).
-# --only-upgrade zlib1g: pick up the fixed zlib1g even when the base image is
-# older than the Debian security update (trivy gate: HIGH CVEs with a fix).
+# Pick up Debian security fixes for zlib and Zstandard when the pinned base
+# image predates them (Trivy blocks HIGH findings with fixes).
 RUN apt-get update && apt-get install -y --no-install-recommends \
         curl ca-certificates \
-    && apt-get install -y --only-upgrade zlib1g \
+    && apt-get install -y --only-upgrade zlib1g libzstd1 \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --gid 1000 app \
     && useradd --uid 1000 --gid 1000 --no-create-home --home-dir /app app
