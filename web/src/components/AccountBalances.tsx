@@ -59,11 +59,11 @@ const META: Record<ProviderId, ProviderMeta> = {
 
 // OpenRouter sits alone at the top because it's the only provider whose card
 // carries a per-model activity subtable -- that table reads horizontally and
-// doesn't fit cleanly inside a 1/3-width column. The remaining three
-// providers share the same compact status grid below.
+// doesn't fit cleanly inside a two-column grid. Kilo and DeepSeek share the
+// same compact status grid below.
 const PRIMARY: ProviderId = "openrouter";
 
-const REST_ORDER: ProviderId[] = ["minimax", "kilo", "deepseek"];
+const REST_ORDER: ProviderId[] = ["kilo", "deepseek"];
 
 // Color for a remaining USD balance: red under $5, yellow under $20.
 function balanceColor(usd: number): string {
@@ -779,7 +779,7 @@ export function AccountBalances() {
 
           <OpenAIProjectsCard />
 
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          <div className="grid gap-4 md:grid-cols-2">
             {REST_ORDER.map((id) => (
               <ProviderCard key={id} account={data[id]} />
             ))}
