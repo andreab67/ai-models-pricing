@@ -2,10 +2,19 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter
+from typing import Annotated
 
-from app.schemas import AccountsUsage, ActivityGroupBy, ActivityPeriodKey, ActivityResponse
-from app.services import accounts
+from fastapi import APIRouter, Depends, HTTPException, Response
+
+from app.config import Settings, get_settings
+from app.schemas import (
+    AccountsUsage,
+    ActivityGroupBy,
+    ActivityPeriodKey,
+    ActivityResponse,
+    OpenAIProjectsResponse,
+)
+from app.services import accounts, openai_projects
 
 router = APIRouter(prefix="/accounts", tags=["accounts"])
 
@@ -30,3 +39,25 @@ async def activity(
     separately.
     """
     return await accounts.get_activity(period, group_by)
+
+
+@router.get("/openai-projects", response_model=OpenAIProjectsResponse)
+async def projects(
+    response: Response, settings: Annotated[Settings, Depends(get_settings)]
+) -> OpenAIProjectsResponse:
+    """Return active OpenAI projects and month-to-date spend in UTC."""
+    headers = {"Cache-Control": "no-store"}
+    if not settings.expose_openai_projects:
+        raise HTTPException(404, "Not Found", headers=headers)
+
+    admin_key = settings.openai_admin_key.strip()
+    if not admin_key:
+        raise HTTPException(503, "OpenAI Admin API key is not configured", headers=headers)
+
+    try:
+        result = await openai_projects.get_projects(admin_key)
+    except openai_projects.OpenAIProjectsUnavailable as exc:
+        raise HTTPException(502, "OpenAI Projects unavailable", headers=headers) from exc
+
+    response.headers.update(headers)
+    return result

@@ -207,6 +207,7 @@ EXPECTED_KEYS: dict[tuple[str, str], set[str]] = {
         "REDIS_URL",
         "OPENROUTER_API_KEY",
         "OPENROUTER_ADMIN_KEY",
+        "OPENAI_ADMIN_KEY",
         "KILO_API_KEY",
         "KILO_TIER",
         "MINIMAX_API_KEY",

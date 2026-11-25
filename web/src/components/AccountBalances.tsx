@@ -4,6 +4,7 @@ import { useState } from "react";
 
 import {
   ActivityContractError,
+  ApiError,
   errMsg,
   fmtCount,
   fmtUsd,
@@ -11,6 +12,7 @@ import {
   isNotExposed,
   useAccountUsage,
   useActivity,
+  useOpenAIProjects,
   type AccountProviderUsage,
   type ActivityGroupBy,
   type ActivityPeriod,
@@ -80,20 +82,6 @@ function ProviderCard({
   children?: React.ReactNode;
 }) {
   const meta = META[account.provider];
-
-  const usedPct =
-    account.limit_usd && account.spent_usd != null
-      ? Math.min(100, (account.spent_usd / account.limit_usd) * 100)
-      : null;
-
-  const usedColor =
-    usedPct == null
-      ? "text-muted"
-      : usedPct > 85
-        ? "text-red-400"
-        : usedPct > 60
-          ? "text-yellow-400"
-          : "text-emerald-400";
 
   return (
     <div className="rounded-lg border border-border bg-card p-4 space-y-3">
@@ -526,6 +514,71 @@ function OpenRouterActivityTable() {
 // Public component: grid of provider cards.
 // ---------------------------------------------------------------------------
 
+function OpenAIProjectsCard() {
+  const { data, error } = useOpenAIProjects();
+  const disabled = error instanceof ApiError && error.status === 404;
+
+  return (
+    <section className="rounded-lg border border-border bg-card p-4 space-y-3" aria-labelledby="openai-projects-heading">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <h3 id="openai-projects-heading" className="font-semibold text-emerald-400">OpenAI Projects</h3>
+          <p className="text-[10px] text-muted/70 uppercase tracking-wider mt-0.5">Active organization projects</p>
+        </div>
+        <a href="https://platform.openai.com/settings/organization/projects" target="_blank" rel="noopener noreferrer" className="text-xs text-muted underline hover:text-fg">
+          View in OpenAI ↗
+        </a>
+      </div>
+      {disabled ? (
+        <p className="text-xs text-muted">Live project data isn’t enabled.</p>
+      ) : error ? (
+        <p className="text-xs text-red-400" role="alert">
+          {error instanceof ApiError && error.status === 503
+            ? "OpenAI Admin API key is not configured."
+            : "Unable to load OpenAI projects."}
+        </p>
+      ) : !data ? (
+        <p className="text-xs text-muted" role="status">Loading projects…</p>
+      ) : (
+        <>
+          <p className="text-xs text-muted">
+            Since {fmtCalendarDate(data.period_start)} (UTC)
+            {!data.spend_available && " · Spend data unavailable"}
+          </p>
+          {data.projects.length === 0 ? (
+            <p className="text-xs text-muted">No active projects.</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs" aria-label="Active OpenAI projects">
+                <thead>
+                  <tr className="text-muted border-b border-border">
+                    <th scope="col" className="text-left font-normal pb-1.5 pr-4">Project</th>
+                    <th scope="col" className="text-left font-normal pb-1.5 pr-4">ID</th>
+                    <th scope="col" className="text-left font-normal pb-1.5 pr-4">Residency</th>
+                    <th scope="col" className="text-left font-normal pb-1.5 pr-4">Created (UTC)</th>
+                    <th scope="col" className="text-right font-normal pb-1.5 whitespace-nowrap">Month-to-date spend</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.projects.map((project) => (
+                    <tr key={project.id} className="border-b border-border/40 last:border-0">
+                      <td className="py-1.5 pr-4 text-fg/80">{project.name || "—"}</td>
+                      <td className="py-1.5 pr-4 font-mono text-fg/80">{project.id}</td>
+                      <td className="py-1.5 pr-4 whitespace-nowrap">{project.residency || "—"}</td>
+                      <td className="py-1.5 pr-4 whitespace-nowrap">{project.created_at.slice(0, 10)}</td>
+                      <td className="py-1.5 text-right font-mono whitespace-nowrap">{fmtUsdOrDash(project.spend_usd)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </>
+      )}
+    </section>
+  );
+}
+
 export function AccountBalances() {
   const { data, error, isLoading } = useAccountUsage();
 
@@ -548,6 +601,8 @@ export function AccountBalances() {
           <ProviderCard account={data[PRIMARY]}>
             <OpenRouterActivityTable />
           </ProviderCard>
+
+          <OpenAIProjectsCard />
 
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
             {REST_ORDER.map((id) => (

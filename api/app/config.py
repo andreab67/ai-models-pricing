@@ -105,6 +105,7 @@ class Settings(BaseSettings):
     anthropic_admin_key: str = Field(default="")
     openai_api_key: str = Field(default="")
     openai_admin_key: str = Field(default="")
+    expose_openai_projects: bool = Field(default=False)
     deepseek_api_key: str = Field(default="")
 
     # --- kilo plan (account widget + daily report savings) ---------------

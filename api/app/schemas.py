@@ -5,7 +5,21 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, FiniteFloat
+
+
+class OpenAIProject(BaseModel):
+    id: str
+    name: str | None
+    residency: str | None
+    created_at: datetime
+    spend_usd: FiniteFloat | None
+
+
+class OpenAIProjectsResponse(BaseModel):
+    projects: list[OpenAIProject]
+    period_start: date
+    spend_available: bool
 
 
 class ModelPricing(BaseModel):

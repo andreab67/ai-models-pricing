@@ -61,6 +61,11 @@ spec:
             - name: OPENROUTER_ADMIN_KEY
               valueFrom:
                 secretKeyRef: { name: model-pricing-secrets, key: OPENROUTER_ADMIN_KEY, optional: true }
+            - name: OPENAI_ADMIN_KEY
+              valueFrom:
+                secretKeyRef: { name: model-pricing-secrets, key: OPENAI_ADMIN_KEY, optional: true }
+            - name: EXPOSE_OPENAI_PROJECTS
+              value: "false"
             - name: KILO_API_KEY
               valueFrom:
                 secretKeyRef: { name: model-pricing-secrets, key: KILO_API_KEY, optional: true }

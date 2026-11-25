@@ -35,6 +35,8 @@ spec:
             # site is behind authentication. Default: not exposed.
             - name: EXPOSE_ACCOUNT_DATA
               value: "false"
+            - name: EXPOSE_OPENAI_PROJECTS
+              value: "false"
           resources:
             requests: { cpu: 50m,  memory: 128Mi }
             limits:   { cpu: 500m, memory: 384Mi }

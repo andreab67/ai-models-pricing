@@ -7,6 +7,14 @@ without credential sharing. `/docs` and `/openapi.json` are available only when
 Account proxy routes still require the existing explicit `EXPOSE_ACCOUNT_DATA`
 opt-in behind owner-managed authentication. Transport failures are not cached.
 
+`/api/accounts/openai-projects` additionally requires `EXPOSE_OPENAI_PROJECTS=true`
+on the web and API workloads. Set it only after confirming who can access the
+dashboard. Provision `OPENAI_ADMIN_KEY` in the API's `model-pricing-secrets`
+Secret through the operator's secret-management process. The browser receives
+project metadata and spend, and the key stays in the API container. The live
+projects route uses `Cache-Control: no-store`. Spend covers the current UTC
+month. The image-only deploy does not change these environment settings.
+
 The daily report exits nonzero when delivery returns false, including when SMTP
 is unconfigured. Rendering a report alone does not count as successful delivery.
 Cache cleanup runs on success and failure. No mail is sent by the test suite.

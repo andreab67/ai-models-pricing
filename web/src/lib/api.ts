@@ -488,6 +488,53 @@ const activityFetcher = async (url: string): Promise<ActivityResponse> => {
   return body;
 };
 
+export interface OpenAIProject {
+  id: string;
+  name: string | null;
+  residency: string | null;
+  created_at: string;
+  spend_usd: number | null;
+}
+
+export interface OpenAIProjectsResponse {
+  projects: OpenAIProject[];
+  period_start: string;
+  spend_available: boolean;
+}
+
+function isOpenAIProject(v: unknown): v is OpenAIProject {
+  return isObject(v) &&
+    "id" in v && typeof v.id === "string" && v.id.length > 0 &&
+    "name" in v && isNullableString(v.name) &&
+    "residency" in v && isNullableString(v.residency) &&
+    "created_at" in v && isString(v.created_at) &&
+    /^\d{4}-\d{2}-\d{2}T.*(?:Z|\+00:00)$/.test(v.created_at) &&
+    Number.isFinite(Date.parse(v.created_at)) &&
+    "spend_usd" in v && isNullableNumber(v.spend_usd);
+}
+
+function isOpenAIProjectsResponse(v: unknown): v is OpenAIProjectsResponse {
+  return isObject(v) &&
+    "projects" in v && Array.isArray(v.projects) && v.projects.every(isOpenAIProject) &&
+    "period_start" in v && isCalendarDate(v.period_start) &&
+    "spend_available" in v && typeof v.spend_available === "boolean";
+}
+
+const openAIProjectsFetcher = async (url: string): Promise<OpenAIProjectsResponse> => {
+  const body = await fetcher<unknown>(url);
+
+  if (!isOpenAIProjectsResponse(body)) throw new Error("Unexpected response from API");
+
+  return body;
+};
+
+export function useOpenAIProjects() {
+  return useSWR<OpenAIProjectsResponse>("/api/accounts/openai-projects", openAIProjectsFetcher, {
+    ...accountConfig,
+    refreshInterval: 900_000,
+  });
+}
+
 export function useKiloModels() {
   return useSWR<ModelPricing[]>("/api/kilo/models", fetcher, {
     ...defaultConfig,
