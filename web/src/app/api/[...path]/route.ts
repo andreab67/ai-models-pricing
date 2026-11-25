@@ -32,6 +32,8 @@ const PUBLIC_ROUTES: RegExp[] = [
 
 const ACCOUNT_ROUTES: RegExp[] = [/^accounts\/usage$/, /^accounts\/activity$/];
 
+const OPENAI_PROJECTS_ROUTE = "accounts/openai-projects";
+
 // Query parameters that must never be forwarded from the public internet.
 const BLOCKED_PARAMS = ["refresh"];
 
@@ -42,11 +44,18 @@ function accountsExposed(): boolean {
 function isAllowed(path: string): boolean {
   if (PUBLIC_ROUTES.some((re) => re.test(path))) return true;
 
+  if (path === OPENAI_PROJECTS_ROUTE) {
+    return accountsExposed() && (process.env.EXPOSE_OPENAI_PROJECTS ?? "").toLowerCase() === "true";
+  }
+
   return accountsExposed() && ACCOUNT_ROUTES.some((re) => re.test(path));
 }
 
 function notFound(): NextResponse {
-  return NextResponse.json({ detail: "Not Found" }, { status: 404 });
+  return NextResponse.json(
+    { detail: "Not Found" },
+    { status: 404, headers: { "cache-control": "no-store" } },
+  );
 }
 
 export async function GET(
@@ -97,7 +106,7 @@ export async function GET(
 
   if (contentType) headers.set("content-type", contentType);
   // Public catalog data may be cached briefly; account data and errors never.
-  const isAccount = ACCOUNT_ROUTES.some((re) => re.test(path));
+  const isAccount = path === OPENAI_PROJECTS_ROUTE || ACCOUNT_ROUTES.some((re) => re.test(path));
   headers.set("cache-control", res.ok && !isAccount ? "public, max-age=60" : "no-store");
 
   return new Response(res.body, { status: res.status, headers });

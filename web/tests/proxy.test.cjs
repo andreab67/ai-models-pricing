@@ -28,11 +28,14 @@ const originalBase = process.env.API_BASE_URL;
 
 const originalExpose = process.env.EXPOSE_ACCOUNT_DATA;
 
+const originalProjectsExpose = process.env.EXPOSE_OPENAI_PROJECTS;
+
 after(() => {
   global.fetch = originalFetch;
 
   for (const [key, value] of [["API_BASE_URL", originalBase],
-                             ["EXPOSE_ACCOUNT_DATA", originalExpose]]) {
+                             ["EXPOSE_ACCOUNT_DATA", originalExpose],
+                             ["EXPOSE_OPENAI_PROJECTS", originalProjectsExpose]]) {
     if (value === undefined) delete process.env[key]; else process.env[key] = value;
   }
 });
@@ -104,6 +107,31 @@ test("explicit account opt-in forwards both paths without caching", async () => 
   }
 
   process.env.EXPOSE_ACCOUNT_DATA = "false";
+});
+
+test("OpenAI Projects requires both opt-ins and is never cached", async () => {
+  const path = ["accounts", "openai-projects"];
+
+  for (const [accounts, projects] of [["true", "false"], ["false", "true"]]) {
+    process.env.EXPOSE_ACCOUNT_DATA = accounts;
+    process.env.EXPOSE_OPENAI_PROJECTS = projects;
+    const calls = stub();
+    const denied = await request(path);
+    assert.equal(denied.status, 404);
+    assert.equal(denied.headers.get("cache-control"), "no-store");
+    assert.equal(calls.length, 0);
+  }
+
+  process.env.EXPOSE_ACCOUNT_DATA = "true";
+  process.env.EXPOSE_OPENAI_PROJECTS = "true";
+  const calls = stub();
+  const response = await request(path);
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("cache-control"), "no-store");
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0][0].pathname, "/accounts/openai-projects");
+  process.env.EXPOSE_ACCOUNT_DATA = "false";
+  process.env.EXPOSE_OPENAI_PROJECTS = "false";
 });
 
 test("upstream status propagates while errors and credentials are never cached or forwarded", async () => {
